@@ -1,0 +1,6 @@
+{
+    "flake_api_url": "http://134.61.8.242:4999",
+    "image_url": "http://134.61.8.242/images/",
+    "database_path": "stacks.db",
+    "port": 5000
+}

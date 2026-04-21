@@ -1,0 +1,74 @@
+.flakeCard {
+  cursor: pointer;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  flex-shrink: 0; /* prevent flex container from squashing cards into thin stripes */
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.flakeCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Explicit-height wrapper so the card always grows to contain the image */
+.flakeCardImageWrap {
+  position: relative;
+  background: #111;
+}
+
+.flakeCardImageWrapCrop {
+  background: #666;
+}
+
+.flakeCardImage {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.flakeCardNoImage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  color: #868e96;
+  font-size: 0.75rem;
+}
+
+.flakeCardFavBadge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  color: #fab005;
+  line-height: 0;
+}
+
+.flakeCardInfoBtn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 0;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.flakeCardInfoBtn:hover {
+  color: #fff;
+}
+
+.flakeCardFpWarning {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: #f03e3e;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.flakeCardInfo {
+  padding: 6px 8px 8px;
+}

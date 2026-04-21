@@ -1,0 +1,53 @@
+services:
+  backend:
+    restart: unless-stopped
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    environment:
+      - GMM_API_URL=http://134.61.8.242:4999
+      - GMM_IMAGE_URL=http://134.61.8.242/images/
+      - DATABASE_PATH=/app/data/stacks.db
+    volumes:
+      - database_mount:/app/data
+    depends_on: []
+
+  frontend_builder:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    restart: "no"
+    environment:
+      - REACT_APP_STACK_BACKEND_URL=./api/
+      - REACT_APP_GMM_IMAGE_URL=http://134.61.8.242/images/
+    volumes:
+      - build_mount:/app/build
+    command: "npm run build"
+
+  nginx:
+    image: nginx:1.27.2-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"  # Change 8080 to whichever port you want the site on
+    volumes:
+      - build_mount:/usr/share/nginx/html
+      - ./etc/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      frontend_builder:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+
+volumes:
+  build_mount:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./Frontend/build
+  database_mount:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./Backend/data

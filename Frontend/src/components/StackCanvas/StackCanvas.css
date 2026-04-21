@@ -1,0 +1,71 @@
+.stackCanvasRoot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  align-items: center;
+}
+
+.stackCanvasArea {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow: hidden;
+  width: 100%;
+}
+
+.stackCanvasContainer {
+  position: relative;
+  background: white;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
+.stackCanvasZoomBar {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--mantine-color-gray-3, #dee2e6);
+  flex-shrink: 0;
+}
+
+.stackCanvasEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.4;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.stackCanvasControls {
+  width: 100%;
+  border-top: 1px solid var(--mantine-color-gray-3, #dee2e6);
+  padding: 0.75rem;
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: 160px;
+}
+
+.layerImage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 300px;
+  height: auto;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.layerImageActive {
+  outline: 2px dashed rgba(51, 154, 240, 0.7);
+  cursor: grab;
+}
+
+.layerImageActive:active {
+  cursor: grabbing;
+}

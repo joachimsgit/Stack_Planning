@@ -1,0 +1,9 @@
+{
+  "short_name": "Stack Planning",
+  "name": "Stack Planning — 2D Material Heterostructure Planner",
+  "icons": [],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}

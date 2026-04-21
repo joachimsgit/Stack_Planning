@@ -1,0 +1,7 @@
+flask
+flask_cors
+sqlalchemy>=2.0.0
+requests
+Pillow
+numpy
+cachetools
