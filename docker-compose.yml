@@ -4,9 +4,11 @@ services:
     build:
       context: ./Backend
       dockerfile: Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - GMM_API_URL=http://134.61.8.242:4999
-      - GMM_IMAGE_URL=http://134.61.8.242/images/
+      - GMM_API_URL=http://host.docker.internal:4999
+      - GMM_IMAGE_URL=http://host.docker.internal/images/
       - DATABASE_PATH=/app/data/stacks.db
     volumes:
       - database_mount:/app/data
