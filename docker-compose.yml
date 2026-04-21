@@ -18,7 +18,7 @@ services:
       dockerfile: Dockerfile
     restart: "no"
     environment:
-      - REACT_APP_STACK_BACKEND_URL=./api/
+      - REACT_APP_STACK_BACKEND_URL=/api/
       - REACT_APP_GMM_IMAGE_URL=http://134.61.8.242/images/
     volumes:
       - build_mount:/app/build
