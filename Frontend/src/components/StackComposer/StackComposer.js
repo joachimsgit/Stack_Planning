@@ -34,10 +34,25 @@ function LayerRow({ layer, isActive, onSelect, onDelete, onMoveUp, onMoveDown, o
       .catch(() => {});
   }, [layer.flake_id, isShape, isLocal]);
 
+  const shapeLabel = (t) => {
+    switch (t) {
+      case "rect":     return "Rect";
+      case "freehand": return "Draw";
+      case "polygon":  return "Polygon";
+      case "distance": return "Distance";
+      case "angle":    return "Angle";
+      default:         return "Shape";
+    }
+  };
   const material = isShape
-    ? (layer.shape_type === "rect" ? "Rect" : "Draw")
+    ? shapeLabel(layer.shape_type)
     : (layer.flake_material || "Unknown");
-  const badgeColor = isShape ? "orange" : (MATERIAL_COLORS[material] || "violet");
+  const shapeBadgeColor = {
+    distance: "red",
+    angle:    "red",
+    polygon:  "grape",
+  }[layer.shape_type] || "orange";
+  const badgeColor = isShape ? shapeBadgeColor : (MATERIAL_COLORS[material] || "violet");
 
   const imgUrl = isShape ? null : (layer.local_image_url || flakeImageUrl(layer.flake_path, "eval_img.jpg"));
 
@@ -52,50 +67,63 @@ function LayerRow({ layer, isActive, onSelect, onDelete, onMoveUp, onMoveDown, o
       className={`layerRow ${isActive ? "layerRowActive" : ""}`}
       onClick={onSelect}
     >
-      {isShape ? (
-        <div
-          className="layerRowThumb"
-          style={{ background: layer.shape_color || "#2196f3", borderRadius: 2, flexShrink: 0 }}
-        />
-      ) : imgUrl ? (
-        <img className="layerRowThumb" src={imgUrl} alt={`Flake ${layer.flake_id}`} />
-      ) : (
-        <div className="layerRowThumbEmpty">
-          <Text size="xs" color="dimmed">?</Text>
-        </div>
-      )}
-
-      <div className="layerRowInfo">
-        <Badge color={badgeColor} variant="light" size="xs">{material}</Badge>
-        {subtext && (
-          <Text size="xs" color="dimmed" truncate>{subtext}</Text>
-        )}
-        <Text size="xs" color="dimmed">Layer {layer.layer_index}</Text>
-        {notesPreview && (
-          <Text size="xs" color="dimmed" truncate style={{ fontStyle: "italic" }}>
-            {notesPreview}
-          </Text>
+      {/* Top action row — visibility + info, prominently placed */}
+      <div className="layerRowTopActions" onClick={(e) => e.stopPropagation()}>
+        <ActionIcon
+          size="lg"
+          variant={isHidden ? "filled" : "light"}
+          color={isHidden ? "gray" : "blue"}
+          onClick={onToggleVisibility}
+          title={isHidden ? "Show layer" : "Hide layer"}
+        >
+          {isHidden ? <IconEyeOff size={20} /> : <IconEye size={20} />}
+        </ActionIcon>
+        {!isShape && onInfo && (
+          <ActionIcon size="lg" variant="light" color="blue" onClick={onInfo} title="Flake info">
+            <IconInfoCircle size={20} />
+          </ActionIcon>
         )}
       </div>
 
-      <div className="layerRowActions" onClick={(e) => e.stopPropagation()}>
-        <ActionIcon size="xs" variant="subtle" onClick={onToggleVisibility} title={isHidden ? "Show layer" : "Hide layer"}>
-          {isHidden ? <IconEyeOff size={12} /> : <IconEye size={12} />}
-        </ActionIcon>
-        {!isShape && onInfo && (
-          <ActionIcon size="xs" variant="subtle" onClick={onInfo} title="Flake info">
-            <IconInfoCircle size={12} />
-          </ActionIcon>
+      {/* Body: thumb + info + side actions */}
+      <div className="layerRowBody">
+        {isShape ? (
+          <div
+            className="layerRowThumb"
+            style={{ background: layer.shape_color || "#2196f3", borderRadius: 2, flexShrink: 0 }}
+          />
+        ) : imgUrl ? (
+          <img className="layerRowThumb" src={imgUrl} alt={`Flake ${layer.flake_id}`} />
+        ) : (
+          <div className="layerRowThumbEmpty">
+            <Text size="xs" color="dimmed">?</Text>
+          </div>
         )}
-        <ActionIcon size="xs" variant="subtle" onClick={onMoveUp} disabled={isFirst}>
-          <IconChevronUp size={12} />
-        </ActionIcon>
-        <ActionIcon size="xs" variant="subtle" onClick={onMoveDown} disabled={isLast}>
-          <IconChevronDown size={12} />
-        </ActionIcon>
-        <ActionIcon size="xs" color="red" variant="subtle" onClick={onDelete}>
-          <IconTrash size={12} />
-        </ActionIcon>
+
+        <div className="layerRowInfo">
+          <Badge color={badgeColor} variant="light" size="sm">{material}</Badge>
+          {subtext && (
+            <Text size="xs" color="dimmed" truncate>{subtext}</Text>
+          )}
+          <Text size="xs" color="dimmed">Layer {layer.layer_index}</Text>
+          {notesPreview && (
+            <Text size="xs" color="dimmed" truncate style={{ fontStyle: "italic" }}>
+              {notesPreview}
+            </Text>
+          )}
+        </div>
+
+        <div className="layerRowActions" onClick={(e) => e.stopPropagation()}>
+          <ActionIcon size="md" variant="subtle" onClick={onMoveUp} disabled={isFirst} title="Move up">
+            <IconChevronUp size={18} />
+          </ActionIcon>
+          <ActionIcon size="md" variant="subtle" onClick={onMoveDown} disabled={isLast} title="Move down">
+            <IconChevronDown size={18} />
+          </ActionIcon>
+          <ActionIcon size="md" color="red" variant="subtle" onClick={onDelete} title="Delete layer">
+            <IconTrash size={18} />
+          </ActionIcon>
+        </div>
       </div>
     </div>
   );

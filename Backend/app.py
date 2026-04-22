@@ -350,8 +350,26 @@ def proxy_outline():
     if not flake_path:
         return Response(_TRANSPARENT_PNG, content_type="image/png")
 
-    if flake_path in _outline_cache:
-        return Response(_outline_cache[flake_path], content_type="image/png")
+    # Parse optional color param: accepts "ffdd00", "#ffdd00", "ff0", "#ff0".
+    # Falls back to yellow (255, 230, 0) on any parse failure.
+    color_arg = (request.args.get("color", "") or "").strip().lstrip("#")
+    r, g, b = 255, 230, 0
+    if len(color_arg) == 3:
+        try:
+            r, g, b = (int(c * 2, 16) for c in color_arg)
+        except ValueError:
+            pass
+    elif len(color_arg) == 6:
+        try:
+            r = int(color_arg[0:2], 16)
+            g = int(color_arg[2:4], 16)
+            b = int(color_arg[4:6], 16)
+        except ValueError:
+            pass
+
+    cache_key = (flake_path, r, g, b)
+    if cache_key in _outline_cache:
+        return Response(_outline_cache[cache_key], content_type="image/png")
 
     image_base = config.get("image_url", "").rstrip("/")
     clean_path = flake_path.replace("\\", "/").strip("/")
@@ -385,17 +403,18 @@ def proxy_outline():
         # 4-px border outside the flake
         border = _dilate(flake_pixels, 4) & ~flake_pixels
 
-        # Yellow (255, 230, 0) on transparent background
+        # Tint the outline pixels with the requested colour (default yellow)
         rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        rgba[border, 0] = 255
-        rgba[border, 1] = 230
+        rgba[border, 0] = r
+        rgba[border, 1] = g
+        rgba[border, 2] = b
         rgba[border, 3] = 255
 
         out = PILImage.fromarray(rgba, "RGBA")
         buf = BytesIO()
         out.save(buf, format="PNG")
         png_bytes = buf.getvalue()
-        _outline_cache[flake_path] = png_bytes
+        _outline_cache[cache_key] = png_bytes
         return Response(png_bytes, content_type="image/png")
 
     except Exception as e:

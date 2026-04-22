@@ -7,7 +7,7 @@ const DISPLAY_BUTTONS = [
   { key: "outline",    label: "Outline"     },
 ];
 
-function CanvasControls({ layer, displayModes, onToggleMode, onUpdateTransform }) {
+function CanvasControls({ layer, displayModes, onToggleMode, onSetDisplayColor, onUpdateTransform }) {
   return (
     <Stack spacing="xs" style={{ padding: "0 0.25rem" }}>
       {!layer ? (
@@ -62,6 +62,36 @@ function CanvasControls({ layer, displayModes, onToggleMode, onUpdateTransform }
                   </Button>
                 ))}
               </Group>
+              {!layer.is_local && (
+                <Group spacing={12} mt={6} align="center">
+                  <Group spacing={4} align="center">
+                    <Text size="xs" color="dimmed">Bbox colour</Text>
+                    <input
+                      type="color"
+                      value={displayModes.bbox_color || "#ffdd00"}
+                      onChange={(e) => onSetDisplayColor && onSetDisplayColor("bbox_color", e.target.value)}
+                      style={{
+                        width: 26, height: 22, padding: 2,
+                        border: "1px solid var(--mantine-color-gray-4, #ced4da)",
+                        borderRadius: 4, cursor: "pointer", background: "none",
+                      }}
+                    />
+                  </Group>
+                  <Group spacing={4} align="center">
+                    <Text size="xs" color="dimmed">Outline colour</Text>
+                    <input
+                      type="color"
+                      value={displayModes.outline_color || "#ffdd00"}
+                      onChange={(e) => onSetDisplayColor && onSetDisplayColor("outline_color", e.target.value)}
+                      style={{
+                        width: 26, height: 22, padding: 2,
+                        border: "1px solid var(--mantine-color-gray-4, #ced4da)",
+                        borderRadius: 4, cursor: "pointer", background: "none",
+                      }}
+                    />
+                  </Group>
+                </Group>
+              )}
             </div>
           )}
 

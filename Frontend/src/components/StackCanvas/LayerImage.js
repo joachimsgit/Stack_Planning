@@ -183,7 +183,8 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
 
   const rawUrl     = flakeImageUrl(layer.flake_path, "raw_img.png");
   const maskedUrl  = flakeMaskedUrl(layer.flake_path);
-  const outlineUrl = flakeOutlineUrl(layer.flake_path);
+  const outlineUrl = flakeOutlineUrl(layer.flake_path, displayModes.outline_color);
+  const bboxColor  = displayModes.bbox_color || "#ffdd00";
 
   const bbox = {
     left:   centroid.bbox_left_pct   ?? 10,
@@ -239,7 +240,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
             width={`${bbox.right - bbox.left}%`}
             height={`${bbox.bottom - bbox.top}%`}
             fill="none"
-            stroke="#ffdd00"
+            stroke={bboxColor}
             strokeWidth={2}
             vectorEffect="non-scaling-stroke"
           />

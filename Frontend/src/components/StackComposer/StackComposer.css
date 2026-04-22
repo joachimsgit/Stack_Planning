@@ -26,13 +26,13 @@
 
 .layerRow {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.1s;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   border: 2px solid transparent;
 }
 
@@ -45,9 +45,22 @@
   background: rgba(51, 154, 240, 0.05);
 }
 
+.layerRowTopActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.layerRowBody {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .layerRowThumb {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
   background: #111;
   border-radius: 4px;
@@ -55,8 +68,8 @@
 }
 
 .layerRowThumbEmpty {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   background: #333;
   border-radius: 4px;
   flex-shrink: 0;
@@ -73,6 +86,6 @@
 .layerRowActions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   flex-shrink: 0;
 }

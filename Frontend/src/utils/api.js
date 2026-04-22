@@ -35,9 +35,11 @@ export function flakeMaskedUrl(flakePath) {
   return `${BASE}/proxy/masked?flake_path=${encodeURIComponent(flakePath)}`;
 }
 
-export function flakeOutlineUrl(flakePath) {
+export function flakeOutlineUrl(flakePath, color) {
   if (!flakePath) return null;
-  return `${BASE}/proxy/outline?flake_path=${encodeURIComponent(flakePath)}`;
+  const qs = new URLSearchParams({ flake_path: flakePath });
+  if (color) qs.set("color", color.replace(/^#/, ""));
+  return `${BASE}/proxy/outline?${qs.toString()}`;
 }
 
 export async function fetchFlakeCentroid(flakePath, signal) {

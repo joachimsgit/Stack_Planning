@@ -4,6 +4,12 @@ const CANVAS_SIZE = 700;
 const HANDLE_R = 9;
 const HANDLE_OFFSET = 30; // px above the selection box top edge
 
+// Kept in sync with StackCanvas.js — see the calibration block there.
+const UM_PER_PX = 0.3844;
+const NATIVE_IMAGE_WIDTH_PX = 1944;
+const DISPLAY_IMAGE_WIDTH = 900;
+const UM_PER_CANVAS_PX = (UM_PER_PX * NATIVE_IMAGE_WIDTH_PX) / DISPLAY_IMAGE_WIDTH;
+
 function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden }) {
   const dragStart = useRef(null);
   const svgRef = useRef(null);
@@ -34,7 +40,7 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
     },
-    [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform]
+    [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform, zoom]
   );
 
   // Returns a pointerdown handler for the rotation handle.
@@ -45,8 +51,6 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
     const svgEl = svgRef.current;
     if (!svgEl) return;
 
-    // getBoundingClientRect accounts for CSS zoom/scale on the canvas container,
-    // so we can map SVG coords → screen coords via the rendered size ratio.
     const rect = svgEl.getBoundingClientRect();
     const scale = rect.width / CANVAS_SIZE;
     const screenCX = rect.left + cx * scale;
@@ -74,8 +78,34 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
   const sw = layer.shape_stroke_width || 2;
   const dx = layer.pos_x || 0;
   const dy = layer.pos_y || 0;
-
   const rotation = layer.rotation || 0;
+
+  // ── Helpers: selection overlay + rotation handle ──
+  const selectionOverlay = (minX, minY, maxX, maxY, cx, cy) => {
+    const selTop = minY - 4;
+    const handleY = selTop - HANDLE_OFFSET;
+    return (
+      <>
+        <rect x={minX - 4} y={minY - 4}
+          width={maxX - minX + 8} height={maxY - minY + 8}
+          fill="none" stroke="rgba(51,154,240,0.7)" strokeWidth={1}
+          strokeDasharray="4 2" pointerEvents="none"
+        />
+        <line x1={cx} y1={selTop} x2={cx} y2={handleY + HANDLE_R}
+          stroke="rgba(51,154,240,0.8)" strokeWidth={1} pointerEvents="none"
+        />
+        <circle cx={cx} cy={handleY} r={HANDLE_R}
+          fill="white" stroke="rgba(51,154,240,0.9)" strokeWidth={2}
+          style={{ cursor: "grab" }}
+          onPointerDown={makeRotateHandler(cx, cy)}
+        />
+        <text x={cx} y={handleY} textAnchor="middle" dominantBaseline="central"
+          fontSize={11} fill="rgba(51,154,240,1)" pointerEvents="none"
+        >↻</text>
+      </>
+    );
+  };
+
   let group = null;
 
   if (layer.shape_type === "rect") {
@@ -84,11 +114,8 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
     const ry = Math.min(y1, y2) + dy;
     const rw = Math.abs(x2 - x1);
     const rh = Math.abs(y2 - y1);
-    // Rotate around the rectangle's own center
     const cx = rx + rw / 2;
     const cy = ry + rh / 2;
-    const selTop = ry - 4;
-    const handleY = selTop - HANDLE_OFFSET;
     group = (
       <g transform={`rotate(${rotation}, ${cx}, ${cy})`}>
         <rect
@@ -97,79 +124,165 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
           style={{ cursor: isActive ? "grab" : "pointer" }}
           onPointerDown={onPointerDown}
         />
-        {isActive && (
-          <>
-            <rect x={rx - 4} y={ry - 4} width={rw + 8} height={rh + 8}
-              fill="none" stroke="rgba(51,154,240,0.7)" strokeWidth={1}
-              strokeDasharray="4 2" pointerEvents="none"
-            />
-            {/* Connector line */}
-            <line
-              x1={cx} y1={selTop} x2={cx} y2={handleY + HANDLE_R}
-              stroke="rgba(51,154,240,0.8)" strokeWidth={1} pointerEvents="none"
-            />
-            {/* Rotation handle */}
-            <circle
-              cx={cx} cy={handleY} r={HANDLE_R}
-              fill="white" stroke="rgba(51,154,240,0.9)" strokeWidth={2}
-              style={{ cursor: "grab" }}
-              onPointerDown={makeRotateHandler(cx, cy)}
-            />
-            <text
-              x={cx} y={handleY} textAnchor="middle" dominantBaseline="central"
-              fontSize={11} fill="rgba(51,154,240,1)" pointerEvents="none"
-            >↻</text>
-          </>
-        )}
+        {isActive && selectionOverlay(rx, ry, rx + rw, ry + rh, cx, cy)}
       </g>
     );
-  } else if (layer.shape_type === "freehand") {
-    const pts = layer.shape_data.points;
-    if (pts && pts.length > 1) {
+  } else if (layer.shape_type === "freehand" || layer.shape_type === "polygon") {
+    const pts = (layer.shape_data?.points) || [];
+    if (pts.length > 1) {
+      const closed = layer.shape_type === "polygon";
       const d = pts
         .map((p, i) => `${i === 0 ? "M" : "L"}${p[0] + dx},${p[1] + dy}`)
-        .join(" ");
+        .join(" ") + (closed ? " Z" : "");
       const xs = pts.map((p) => p[0] + dx);
       const ys = pts.map((p) => p[1] + dy);
       const minX = Math.min(...xs), minY = Math.min(...ys);
       const maxX = Math.max(...xs), maxY = Math.max(...ys);
-      // Rotate around the bounding-box center of the path
       const cx = (minX + maxX) / 2;
       const cy = (minY + maxY) / 2;
-      const selTop = minY - 4;
-      const handleY = selTop - HANDLE_OFFSET;
       group = (
         <g transform={`rotate(${rotation}, ${cx}, ${cy})`}>
           <path
-            d={d} fill="none" stroke={color} strokeWidth={sw}
+            d={d}
+            fill={closed ? `${color}26` : "none"}
+            stroke={color} strokeWidth={sw}
             strokeLinecap="round" strokeLinejoin="round"
             style={{ cursor: isActive ? "grab" : "pointer" }}
             onPointerDown={onPointerDown}
           />
-          {isActive && (
-            <>
-              <rect x={minX - 4} y={minY - 4} width={maxX - minX + 8} height={maxY - minY + 8}
-                fill="none" stroke="rgba(51,154,240,0.7)" strokeWidth={1}
-                strokeDasharray="4 2" pointerEvents="none"
-              />
-              {/* Connector line */}
-              <line
-                x1={cx} y1={selTop} x2={cx} y2={handleY + HANDLE_R}
-                stroke="rgba(51,154,240,0.8)" strokeWidth={1} pointerEvents="none"
-              />
-              {/* Rotation handle */}
-              <circle
-                cx={cx} cy={handleY} r={HANDLE_R}
-                fill="white" stroke="rgba(51,154,240,0.9)" strokeWidth={2}
-                style={{ cursor: "grab" }}
-                onPointerDown={makeRotateHandler(cx, cy)}
-              />
-              <text
-                x={cx} y={handleY} textAnchor="middle" dominantBaseline="central"
-                fontSize={11} fill="rgba(51,154,240,1)" pointerEvents="none"
-              >↻</text>
-            </>
-          )}
+          {isActive && selectionOverlay(minX, minY, maxX, maxY, cx, cy)}
+        </g>
+      );
+    }
+  } else if (layer.shape_type === "distance") {
+    const pts = (layer.shape_data?.points) || [];
+    if (pts.length === 2) {
+      const [p1, p2] = pts;
+      const ax = p1[0] + dx, ay = p1[1] + dy;
+      const bx = p2[0] + dx, by = p2[1] + dy;
+      const distPx = Math.hypot(bx - ax, by - ay);
+      const distUm = distPx * UM_PER_CANVAS_PX;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      // Offset the label perpendicular to the line
+      const angle = Math.atan2(by - ay, bx - ax);
+      const perp = angle - Math.PI / 2;
+      const lx = mx + Math.cos(perp) * 14;
+      const ly = my + Math.sin(perp) * 14;
+      const minX = Math.min(ax, bx), minY = Math.min(ay, by);
+      const maxX = Math.max(ax, bx), maxY = Math.max(ay, by);
+      group = (
+        <g transform={`rotate(${rotation}, ${mx}, ${my})`}>
+          <line x1={ax} y1={ay} x2={bx} y2={by}
+            stroke="white" strokeWidth={sw + 2}
+            style={{ cursor: isActive ? "grab" : "pointer" }}
+            onPointerDown={onPointerDown}
+          />
+          <line x1={ax} y1={ay} x2={bx} y2={by}
+            stroke={color} strokeWidth={sw} pointerEvents="none"
+          />
+          {[p1, p2].map((p, i) => (
+            <g key={i}>
+              <circle cx={p[0] + dx} cy={p[1] + dy} r={4} fill="white" pointerEvents="none" />
+              <circle cx={p[0] + dx} cy={p[1] + dy} r={3} fill={color} pointerEvents="none" />
+            </g>
+          ))}
+          <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+            fontSize={13} fontFamily="sans-serif" fontWeight="700"
+            stroke="white" strokeWidth={4} paintOrder="stroke" fill="white"
+            pointerEvents="none"
+          >
+            {distUm.toFixed(2)} µm
+          </text>
+          <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+            fontSize={13} fontFamily="sans-serif" fontWeight="700" fill={color}
+            pointerEvents="none"
+          >
+            {distUm.toFixed(2)} µm
+          </text>
+          {isActive && selectionOverlay(minX, minY, maxX, maxY, mx, my)}
+        </g>
+      );
+    }
+  } else if (layer.shape_type === "angle") {
+    const pts = (layer.shape_data?.points) || [];
+    if (pts.length === 3) {
+      const [p1, p2, p3] = pts;
+      const ax = p1[0] + dx, ay = p1[1] + dy;
+      const bx = p2[0] + dx, by = p2[1] + dy; // vertex
+      const cx2 = p3[0] + dx, cy2 = p3[1] + dy;
+
+      const v1x = ax - bx, v1y = ay - by;
+      const v2x = cx2 - bx, v2y = cy2 - by;
+      const m1 = Math.hypot(v1x, v1y);
+      const m2 = Math.hypot(v2x, v2y);
+      const dot = v1x * v2x + v1y * v2y;
+      const angleRad = (m1 > 1e-6 && m2 > 1e-6)
+        ? Math.acos(Math.max(-1, Math.min(1, dot / (m1 * m2))))
+        : 0;
+      const angleDeg = angleRad * 180 / Math.PI;
+
+      const arcR = Math.min(28, Math.min(m1, m2) * 0.6);
+      const a1 = Math.atan2(v1y, v1x);
+      const a2 = Math.atan2(v2y, v2x);
+      // Draw the arc along the short angular direction so it visually spans the angle
+      let da = a2 - a1;
+      while (da > Math.PI) da -= 2 * Math.PI;
+      while (da < -Math.PI) da += 2 * Math.PI;
+      const sweep = da > 0 ? 1 : 0;
+      const arcStart = [bx + Math.cos(a1) * arcR, by + Math.sin(a1) * arcR];
+      const arcEnd   = [bx + Math.cos(a2) * arcR, by + Math.sin(a2) * arcR];
+      const arcPath = `M ${arcStart[0]} ${arcStart[1]} A ${arcR} ${arcR} 0 0 ${sweep} ${arcEnd[0]} ${arcEnd[1]}`;
+
+      const midA = a1 + da / 2;
+      const lx = bx + Math.cos(midA) * (arcR + 14);
+      const ly = by + Math.sin(midA) * (arcR + 14);
+
+      const xs = [ax, bx, cx2], ys = [ay, by, cy2];
+      const minX = Math.min(...xs), minY = Math.min(...ys);
+      const maxX = Math.max(...xs), maxY = Math.max(...ys);
+
+      group = (
+        <g transform={`rotate(${rotation}, ${bx}, ${by})`}>
+          {/* Invisible hit target along each arm for easy grabbing */}
+          <line x1={ax} y1={ay} x2={bx} y2={by}
+            stroke="transparent" strokeWidth={10}
+            style={{ cursor: isActive ? "grab" : "pointer" }}
+            onPointerDown={onPointerDown}
+          />
+          <line x1={bx} y1={by} x2={cx2} y2={cy2}
+            stroke="transparent" strokeWidth={10}
+            style={{ cursor: isActive ? "grab" : "pointer" }}
+            onPointerDown={onPointerDown}
+          />
+          <line x1={ax} y1={ay} x2={bx} y2={by}
+            stroke="white" strokeWidth={sw + 2} pointerEvents="none" />
+          <line x1={ax} y1={ay} x2={bx} y2={by}
+            stroke={color} strokeWidth={sw} pointerEvents="none" />
+          <line x1={bx} y1={by} x2={cx2} y2={cy2}
+            stroke="white" strokeWidth={sw + 2} pointerEvents="none" />
+          <line x1={bx} y1={by} x2={cx2} y2={cy2}
+            stroke={color} strokeWidth={sw} pointerEvents="none" />
+          <path d={arcPath} fill="none" stroke={color} strokeWidth={sw} pointerEvents="none" />
+          {[p1, p2, p3].map((p, i) => (
+            <g key={i}>
+              <circle cx={p[0] + dx} cy={p[1] + dy} r={4} fill="white" pointerEvents="none" />
+              <circle cx={p[0] + dx} cy={p[1] + dy} r={3} fill={color} pointerEvents="none" />
+            </g>
+          ))}
+          <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+            fontSize={13} fontFamily="sans-serif" fontWeight="700"
+            stroke="white" strokeWidth={4} paintOrder="stroke" fill="white"
+            pointerEvents="none"
+          >
+            {angleDeg.toFixed(1)}°
+          </text>
+          <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+            fontSize={13} fontFamily="sans-serif" fontWeight="700" fill={color}
+            pointerEvents="none"
+          >
+            {angleDeg.toFixed(1)}°
+          </text>
+          {isActive && selectionOverlay(minX, minY, maxX, maxY, bx, by)}
         </g>
       );
     }

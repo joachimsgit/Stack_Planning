@@ -1,7 +1,7 @@
 import "./StackCanvas.css";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Text, Slider, Group, ActionIcon, Divider, Tooltip } from "@mantine/core";
-import { IconLayersIntersect, IconRectangle, IconPencil, IconRuler2 } from "@tabler/icons-react";
+import { IconLayersIntersect, IconRectangle, IconPencil, IconRuler2, IconAngle, IconPolygon } from "@tabler/icons-react";
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
 import CanvasControls from "./CanvasControls";
@@ -9,7 +9,14 @@ import CanvasControls from "./CanvasControls";
 const CANVAS_SIZE = 700;
 const ROTATION_STEP = 3;
 const ZOOM_STEP = 0.15;
-const DEFAULT_DISPLAY_MODES = { background: false, flake: true, bbox: false, outline: false };
+const DEFAULT_DISPLAY_MODES = {
+  background: false,
+  flake: true,
+  bbox: false,
+  outline: false,
+  bbox_color: "#ffdd00",
+  outline_color: "#ffdd00",
+};
 
 // ── Scale calibration for 20x images ────────────────────────────────────────
 // Camera pixel size at 20x magnification
@@ -30,12 +37,12 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
   const [layerDisplayModes, setLayerDisplayModes] = useState({});
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [activeTool, setActiveTool] = useState(null); // null | "rect" | "freehand" | "measure"
+  const [activeTool, setActiveTool] = useState(null); // null | "rect" | "freehand" | "polygon" | "measure" | "protractor"
   const [drawColor, setDrawColor] = useState("#2196f3");
   const [drawingShape, setDrawingShape] = useState(null);
-  // Measure tool state
-  const [measurePoints, setMeasurePoints] = useState([]); // [{x, y}] — 0, 1, or 2 points
-  const [measureHover, setMeasureHover]   = useState(null); // live cursor position (canvas px)
+  // Multi-click tool state (shared between measure / protractor / polygon)
+  const [toolPoints, setToolPoints] = useState([]); // [{x, y}]
+  const [toolHover, setToolHover]   = useState(null); // live cursor position (canvas px)
 
   const rootRef             = useRef(null);
   const canvasContainerRef  = useRef(null);
@@ -48,6 +55,7 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
   const activeLayerIndexRef = useRef(activeLayerIndex);
   const zoomRef             = useRef(zoom);
   const panOffsetRef        = useRef(panOffset);
+  const toolPointsRef       = useRef([]);
 
   useEffect(() => { sortedRef.current = sorted; });
   useEffect(() => { activeLayerRef.current = activeLayer; });
@@ -56,13 +64,13 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
   useEffect(() => { panOffsetRef.current = panOffset; }, [panOffset]);
   useEffect(() => { drawColorRef.current = drawColor; }, [drawColor]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  useEffect(() => { toolPointsRef.current = toolPoints; }, [toolPoints]);
 
-  // Clear measure state when leaving the measure tool
+  // Clear multi-click state when switching tools
   useEffect(() => {
-    if (activeTool !== "measure") {
-      setMeasurePoints([]);
-      setMeasureHover(null);
-    }
+    toolPointsRef.current = [];
+    setToolPoints([]);
+    setToolHover(null);
   }, [activeTool]);
 
   // Key tracking
@@ -149,7 +157,7 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
     (e) => {
       e.preventDefault();
       const tool = activeToolRef.current;
-      if (!tool || tool === "measure") return;
+      if (tool !== "rect" && tool !== "freehand") return;
       const pos = getCanvasPos(e.clientX, e.clientY);
 
       if (tool === "rect") {
@@ -208,19 +216,100 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
     [getCanvasPos, onAddShape]
   );
 
-  // ── Measure tool handlers ────────────────────────────────────────────────
-  const handleMeasurePointerDown = useCallback((e) => {
+  // ── Persist a multi-click tool result as a shape layer ───────────────────
+  const persistMeasurement = useCallback((shapeType, pts) => {
+    const all = sortedRef.current;
+    const nextIndex = all.length > 0 ? Math.max(...all.map((l) => l.layer_index)) + 1 : 1;
+    onAddShape({
+      id: `shape-${Date.now()}`,
+      is_shape: true,
+      shape_type: shapeType,
+      shape_data: { points: pts.map((p) => [p.x, p.y]) },
+      shape_color: drawColorRef.current,
+      shape_stroke_width: 2,
+      layer_index: nextIndex,
+      pos_x: 0, pos_y: 0, rotation: 0,
+      opacity: 1, brightness: 1, contrast: 1,
+      flake_material: null, flake_id: null, flake_path: null,
+    });
+  }, [onAddShape]);
+
+  // ── Multi-click tool handlers (measure / protractor / polygon) ───────────
+  // Uses toolPointsRef (not toolPoints state) so rapid clicks see the latest value,
+  // and so side-effects like persistMeasurement never run inside a setState updater.
+  const handleToolPointerDown = useCallback((e) => {
     e.preventDefault();
     const pos = getCanvasPos(e.clientX, e.clientY);
-    setMeasurePoints((prev) => {
-      if (prev.length >= 2) return [pos]; // start a new measurement
-      return [...prev, pos];
-    });
+    const tool = activeToolRef.current;
+    const prev = toolPointsRef.current;
+
+    const commit = (next) => {
+      toolPointsRef.current = next;
+      setToolPoints(next);
+    };
+
+    if (tool === "measure") {
+      if (prev.length >= 2) { commit([pos]); return; }
+      const next = [...prev, pos];
+      if (next.length === 2) {
+        persistMeasurement("distance", next);
+        commit([]);
+      } else {
+        commit(next);
+      }
+    } else if (tool === "protractor") {
+      if (prev.length >= 3) { commit([pos]); return; }
+      const next = [...prev, pos];
+      if (next.length === 3) {
+        persistMeasurement("angle", next);
+        commit([]);
+      } else {
+        commit(next);
+      }
+    } else if (tool === "polygon") {
+      if (prev.length >= 3) {
+        const dxp = pos.x - prev[0].x;
+        const dyp = pos.y - prev[0].y;
+        if (dxp * dxp + dyp * dyp < 100) {
+          persistMeasurement("polygon", prev);
+          commit([]);
+          return;
+        }
+      }
+      commit([...prev, pos]);
+    }
+  }, [getCanvasPos, persistMeasurement]);
+
+  const handleToolPointerMove = useCallback((e) => {
+    setToolHover(getCanvasPos(e.clientX, e.clientY));
   }, [getCanvasPos]);
 
-  const handleMeasurePointerMove = useCallback((e) => {
-    setMeasureHover(getCanvasPos(e.clientX, e.clientY));
-  }, [getCanvasPos]);
+  // Polygon: close on double-click or Enter, cancel on Escape
+  const closePolygon = useCallback(() => {
+    const prev = toolPointsRef.current;
+    if (prev.length >= 3) persistMeasurement("polygon", prev);
+    toolPointsRef.current = [];
+    setToolPoints([]);
+  }, [persistMeasurement]);
+
+  const handleToolDoubleClick = useCallback(() => {
+    if (activeToolRef.current !== "polygon") return;
+    closePolygon();
+  }, [closePolygon]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (activeToolRef.current !== "polygon") return;
+      if (e.key === "Escape") {
+        toolPointsRef.current = [];
+        setToolPoints([]);
+      } else if (e.key === "Enter") {
+        closePolygon();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [closePolygon]);
 
   // ── Scale bar computation ────────────────────────────────────────────────
   // The scale bar SVG sits outside the scaled container in raw screen pixels.
@@ -232,21 +321,34 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
   const barLabel    = barUm >= 1000 ? `${barUm / 1000} mm` : `${barUm} µm`;
 
   // ── Measurement geometry ─────────────────────────────────────────────────
-  const liveEnd = measurePoints.length === 1 ? measureHover : null;
-
   // getCanvasPos already returns canvas-space coords (divided by zoom),
   // so distance in canvas pixels converts directly to µm without zoom factor.
   const distUm = (ax, ay, bx, by) => {
     const px = Math.sqrt((bx - ax) ** 2 + (by - ay) ** 2);
     return px * UM_PER_CANVAS_PX;
   };
+  const angleDeg = (a, b, c) => {
+    const v1x = a.x - b.x, v1y = a.y - b.y;
+    const v2x = c.x - b.x, v2y = c.y - b.y;
+    const dot = v1x * v2x + v1y * v2y;
+    const m1 = Math.hypot(v1x, v1y);
+    const m2 = Math.hypot(v2x, v2y);
+    if (m1 < 1e-6 || m2 < 1e-6) return 0;
+    return Math.acos(Math.max(-1, Math.min(1, dot / (m1 * m2)))) * 180 / Math.PI;
+  };
 
   // ── Helpers ──────────────────────────────────────────────────────────────
-  const getDisplayModes = (layerId) => layerDisplayModes[layerId] || DEFAULT_DISPLAY_MODES;
+  const getDisplayModes = (layerId) => ({ ...DEFAULT_DISPLAY_MODES, ...(layerDisplayModes[layerId] || {}) });
   const toggleDisplayMode = (layerId, mode) => {
     setLayerDisplayModes((prev) => {
-      const cur = prev[layerId] || DEFAULT_DISPLAY_MODES;
+      const cur = { ...DEFAULT_DISPLAY_MODES, ...(prev[layerId] || {}) };
       return { ...prev, [layerId]: { ...cur, [mode]: !cur[mode] } };
+    });
+  };
+  const setDisplayColor = (layerId, key, value) => {
+    setLayerDisplayModes((prev) => {
+      const cur = { ...DEFAULT_DISPLAY_MODES, ...(prev[layerId] || {}) };
+      return { ...prev, [layerId]: { ...cur, [key]: value } };
     });
   };
 
@@ -293,6 +395,15 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
               <IconPencil size={14} />
             </ActionIcon>
           </Tooltip>
+          <Tooltip label="Polygon (click to add vertex, click first point or Enter to close, Esc to cancel)" withArrow>
+            <ActionIcon
+              size="sm"
+              variant={activeTool === "polygon" ? "filled" : "default"}
+              onClick={() => toggleTool("polygon")}
+            >
+              <IconPolygon size={14} />
+            </ActionIcon>
+          </Tooltip>
           <Tooltip label="Shape colour" withArrow>
             <input
               type="color"
@@ -308,13 +419,22 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
 
           <Divider orientation="vertical" />
 
-          <Tooltip label="Measure distance" withArrow>
+          <Tooltip label="Measure distance (click two points)" withArrow>
             <ActionIcon
               size="sm"
               variant={activeTool === "measure" ? "filled" : "default"}
               onClick={() => toggleTool("measure")}
             >
               <IconRuler2 size={14} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Measure angle (click three points — middle is the vertex)" withArrow>
+            <ActionIcon
+              size="sm"
+              variant={activeTool === "protractor" ? "filled" : "default"}
+              onClick={() => toggleTool("protractor")}
+            >
+              <IconAngle size={14} />
             </ActionIcon>
           </Tooltip>
         </Group>
@@ -404,8 +524,8 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
               </svg>
             )}
 
-            {/* ── Measurement overlay (inside scaled container so it zooms with content) ── */}
-            {activeTool === "measure" && measurePoints.length > 0 && (
+            {/* ── Multi-click tool preview overlay (measure / protractor / polygon) ── */}
+            {(activeTool === "measure" || activeTool === "protractor" || activeTool === "polygon") && toolPoints.length > 0 && (
               <svg
                 style={{
                   position: "absolute", top: 0, left: 0,
@@ -414,81 +534,123 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
                 }}
               >
                 <g>
-                  <circle cx={measurePoints[0].x} cy={measurePoints[0].y} r={5} fill="white" />
-                  <circle cx={measurePoints[0].x} cy={measurePoints[0].y} r={4} fill="#e03131" stroke="#c92a2a" strokeWidth={1} />
+                  {toolPoints.map((p, i) => (
+                    <g key={i}>
+                      <circle cx={p.x} cy={p.y} r={5} fill="white" />
+                      <circle cx={p.x} cy={p.y} r={4} fill={drawColor} stroke="rgba(0,0,0,0.5)" strokeWidth={1} />
+                    </g>
+                  ))}
 
-                  {measurePoints.length === 2 && (
-                    <>
-                      <circle cx={measurePoints[1].x} cy={measurePoints[1].y} r={5} fill="white" />
-                      <circle cx={measurePoints[1].x} cy={measurePoints[1].y} r={4} fill="#e03131" stroke="#c92a2a" strokeWidth={1} />
-                    </>
-                  )}
-
-                  {measurePoints.length === 2 && (() => {
-                    const [A, B] = measurePoints;
-                    const d = distUm(A.x, A.y, B.x, B.y);
-                    const mx = (A.x + B.x) / 2;
-                    const my = (A.y + B.y) / 2;
-                    const angle = Math.atan2(B.y - A.y, B.x - A.x) * (180 / Math.PI);
-                    const perpAngle = (angle - 90) * (Math.PI / 180);
-                    const lx = mx + Math.cos(perpAngle) * 14;
-                    const ly = my + Math.sin(perpAngle) * 14;
+                  {/* MEASURE live preview */}
+                  {activeTool === "measure" && toolPoints.length === 1 && toolHover && (() => {
+                    const A = toolPoints[0];
+                    const d = distUm(A.x, A.y, toolHover.x, toolHover.y);
                     return (
                       <>
-                        <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="white" strokeWidth={3} />
-                        <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="#e03131" strokeWidth={1.5} />
-                        <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
-                          fontSize={13} fontFamily="sans-serif" fontWeight="700"
-                          stroke="white" strokeWidth={4} paintOrder="stroke" fill="white">
+                        <line x1={A.x} y1={A.y} x2={toolHover.x} y2={toolHover.y}
+                          stroke="white" strokeWidth={3} opacity={0.6} />
+                        <line x1={A.x} y1={A.y} x2={toolHover.x} y2={toolHover.y}
+                          stroke={drawColor} strokeWidth={1.5} strokeDasharray="5 3" />
+                        <text x={toolHover.x + 10} y={toolHover.y - 8}
+                          fontSize={12} fontFamily="sans-serif" fontWeight="600"
+                          stroke="white" strokeWidth={3} paintOrder="stroke" fill="white">
                           {d.toFixed(2)} µm
                         </text>
-                        <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
-                          fontSize={13} fontFamily="sans-serif" fontWeight="700" fill="#c92a2a">
+                        <text x={toolHover.x + 10} y={toolHover.y - 8}
+                          fontSize={12} fontFamily="sans-serif" fontWeight="600" fill={drawColor}>
                           {d.toFixed(2)} µm
                         </text>
                       </>
                     );
                   })()}
 
-                  {liveEnd && (() => {
-                    const A = measurePoints[0];
-                    const d = distUm(A.x, A.y, liveEnd.x, liveEnd.y);
-                    return (
-                      <>
-                        <line x1={A.x} y1={A.y} x2={liveEnd.x} y2={liveEnd.y}
-                          stroke="white" strokeWidth={3} opacity={0.6} />
-                        <line x1={A.x} y1={A.y} x2={liveEnd.x} y2={liveEnd.y}
-                          stroke="#e03131" strokeWidth={1.5} strokeDasharray="5 3" />
-                        <text x={liveEnd.x + 10} y={liveEnd.y - 8}
-                          fontSize={12} fontFamily="sans-serif" fontWeight="600"
-                          stroke="white" strokeWidth={3} paintOrder="stroke" fill="white">
-                          {d.toFixed(2)} µm
-                        </text>
-                        <text x={liveEnd.x + 10} y={liveEnd.y - 8}
-                          fontSize={12} fontFamily="sans-serif" fontWeight="600" fill="#c92a2a">
-                          {d.toFixed(2)} µm
-                        </text>
-                      </>
-                    );
+                  {/* PROTRACTOR live preview */}
+                  {activeTool === "protractor" && toolPoints.length >= 1 && (() => {
+                    const segs = [];
+                    for (let i = 0; i < toolPoints.length - 1; i++) {
+                      segs.push(
+                        <g key={`s${i}`}>
+                          <line x1={toolPoints[i].x} y1={toolPoints[i].y}
+                            x2={toolPoints[i + 1].x} y2={toolPoints[i + 1].y}
+                            stroke="white" strokeWidth={3} />
+                          <line x1={toolPoints[i].x} y1={toolPoints[i].y}
+                            x2={toolPoints[i + 1].x} y2={toolPoints[i + 1].y}
+                            stroke={drawColor} strokeWidth={1.5} />
+                        </g>
+                      );
+                    }
+                    const last = toolPoints[toolPoints.length - 1];
+                    if (toolHover && toolPoints.length < 3) {
+                      segs.push(
+                        <line key="live" x1={last.x} y1={last.y} x2={toolHover.x} y2={toolHover.y}
+                          stroke={drawColor} strokeWidth={1.5} strokeDasharray="5 3" opacity={0.7} />
+                      );
+                    }
+                    if (toolPoints.length === 2 && toolHover) {
+                      const ang = angleDeg(toolPoints[0], toolPoints[1], toolHover);
+                      return (
+                        <>
+                          {segs}
+                          <text x={toolPoints[1].x + 10} y={toolPoints[1].y - 10}
+                            fontSize={13} fontFamily="sans-serif" fontWeight="700"
+                            stroke="white" strokeWidth={4} paintOrder="stroke" fill="white">
+                            {ang.toFixed(1)}°
+                          </text>
+                          <text x={toolPoints[1].x + 10} y={toolPoints[1].y - 10}
+                            fontSize={13} fontFamily="sans-serif" fontWeight="700" fill={drawColor}>
+                            {ang.toFixed(1)}°
+                          </text>
+                        </>
+                      );
+                    }
+                    return <>{segs}</>;
+                  })()}
+
+                  {/* POLYGON live preview */}
+                  {activeTool === "polygon" && toolPoints.length >= 1 && (() => {
+                    const segs = [];
+                    for (let i = 0; i < toolPoints.length - 1; i++) {
+                      segs.push(
+                        <line key={`p${i}`} x1={toolPoints[i].x} y1={toolPoints[i].y}
+                          x2={toolPoints[i + 1].x} y2={toolPoints[i + 1].y}
+                          stroke={drawColor} strokeWidth={2} />
+                      );
+                    }
+                    const last = toolPoints[toolPoints.length - 1];
+                    if (toolHover) {
+                      segs.push(
+                        <line key="live" x1={last.x} y1={last.y} x2={toolHover.x} y2={toolHover.y}
+                          stroke={drawColor} strokeWidth={2} strokeDasharray="5 3" opacity={0.7} />
+                      );
+                    }
+                    if (toolPoints.length >= 3 && toolHover) {
+                      // Visual cue for the close-target
+                      segs.push(
+                        <circle key="close" cx={toolPoints[0].x} cy={toolPoints[0].y} r={8}
+                          fill="none" stroke={drawColor} strokeWidth={1.5} strokeDasharray="2 2" />
+                      );
+                    }
+                    return <>{segs}</>;
                   })()}
                 </g>
               </svg>
             )}
 
-            {/* Drawing capture overlay (rect / freehand) */}
-            {activeTool && activeTool !== "measure" && (
+            {/* Drawing capture overlay (rect / freehand — drag-based) */}
+            {activeTool && activeTool !== "measure" && activeTool !== "protractor" && activeTool !== "polygon" && (
               <div
                 style={{ position: "absolute", inset: 0, zIndex: 999, cursor: "crosshair" }}
                 onPointerDown={handleDrawStart}
               />
             )}
 
-            {/* Measure capture overlay */}
-            {activeTool === "measure" && (
+            {/* Multi-click capture overlay (measure / protractor / polygon) */}
+            {(activeTool === "measure" || activeTool === "protractor" || activeTool === "polygon") && (
               <div
                 style={{ position: "absolute", inset: 0, zIndex: 999, cursor: "crosshair" }}
-                onPointerDown={handleMeasurePointerDown}
-                onPointerMove={handleMeasurePointerMove}
+                onPointerDown={handleToolPointerDown}
+                onPointerMove={handleToolPointerMove}
+                onDoubleClick={handleToolDoubleClick}
               />
             )}
           </div>
@@ -528,6 +690,7 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
           layer={activeLayer}
           displayModes={activeLayer ? getDisplayModes(activeLayer.id) : DEFAULT_DISPLAY_MODES}
           onToggleMode={(mode) => activeLayer && toggleDisplayMode(activeLayer.id, mode)}
+          onSetDisplayColor={(key, value) => activeLayer && setDisplayColor(activeLayer.id, key, value)}
           onUpdateTransform={handleUpdateTransform}
         />
       </div>
