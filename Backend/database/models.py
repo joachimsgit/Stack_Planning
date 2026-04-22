@@ -80,6 +80,9 @@ class StackLayer(Base):
     stack_id = Column(Integer, ForeignKey("stacks.id", ondelete="CASCADE"), nullable=False, index=True)
     layer_index = Column(Integer, nullable=False, default=0)
 
+    # Optional user-supplied display name (also used as the on-disk folder name)
+    name = Column(String(255), nullable=True)
+
     # Reference into the GMM database (no FK constraint — different DB)
     # Nullable so that shape-only layers don't require a flake reference
     flake_id = Column(Integer, nullable=True, index=True)
@@ -113,6 +116,7 @@ class StackLayer(Base):
             "id": self.id,
             "stack_id": self.stack_id,
             "layer_index": self.layer_index,
+            "name": self.name,
             "pos_x": self.pos_x,
             "pos_y": self.pos_y,
             "rotation": self.rotation,

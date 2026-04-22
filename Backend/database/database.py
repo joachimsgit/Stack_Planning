@@ -38,6 +38,7 @@ def run_migrations(engine):
             ("shape_data",         "TEXT"),
             ("shape_color",        "TEXT"),
             ("shape_stroke_width", "REAL DEFAULT 2.0"),
+            ("name",               "TEXT"),
         ]
         for col_name, col_def in shape_migrations:
             if col_name not in layers_cols:

@@ -8,8 +8,11 @@ services:
       - GMM_API_URL=http://2dmatgmm-website-dev-backend-1:8000
       - GMM_IMAGE_URL=http://2dmatgmm-website-dev-nginx-1/images/
       - DATABASE_PATH=/app/data/stacks.db
+      - FS_ROOT=/app/data
+      - SCANS_ROOT=/scans
     volumes:
       - database_mount:/app/data
+      - scans_mount:/scans:ro
     networks:
       - default
       - gmm_network
@@ -52,7 +55,13 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ./Backend/data
+      device: /data/NVME_4TB/stack_planning_database
+  scans_mount:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/NVME_4TB
 
 networks:
   default:

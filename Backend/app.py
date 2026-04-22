@@ -3,6 +3,7 @@ import os
 import time
 import gzip
 from io import BytesIO
+from pathlib import Path
 from cachetools import LRUCache
 
 # Minimal 1×1 transparent PNG returned when an upstream image is unavailable.
@@ -25,6 +26,7 @@ from flask_cors import CORS
 from sqlalchemy.orm import subqueryload
 from database.database import create_db_engine, create_session_factory, init_db, run_migrations
 from database.models import User, Stack, StackLayer, FlakeNote
+from database import filesystem_mirror as fs_mirror
 from services import flake_proxy
 
 # ---------------------------------------------------------------------------
@@ -40,19 +42,39 @@ for _env_key, _cfg_key in [
     ("GMM_API_URL", "flake_api_url"),
     ("GMM_IMAGE_URL", "image_url"),
     ("DATABASE_PATH", "database_path"),
+    ("FS_ROOT", "fs_root"),
+    ("SCANS_ROOT", "scans_root"),
 ]:
     _val = os.environ.get(_env_key)
     if _val is not None:
         config[_cfg_key] = _val
 
 # ---------------------------------------------------------------------------
-# Database
+# Database + filesystem mirror
 # ---------------------------------------------------------------------------
 
 engine = create_db_engine(config)
 init_db(engine)
 run_migrations(engine)
 db_session = create_session_factory(engine)
+
+# Filesystem mirror roots. `fs_root` holds the browsable user/stack tree
+# (defaults to the directory containing the SQLite file). `scans_root` is
+# the read-only mount of the GMM scans volume used to source flake images.
+_db_path = config.get("database_path", "stacks.db")
+if not os.path.isabs(_db_path):
+    _db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), _db_path))
+FS_ROOT = Path(config.get("fs_root") or os.path.dirname(_db_path))
+SCANS_ROOT = Path(config.get("scans_root", "/scans"))
+FS_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Self-healing metadata re-mirror on boot. Does not recopy flake images.
+fs_mirror.resync_all(db_session, FS_ROOT)
+
+
+def _scans_root_if_present():
+    """Return SCANS_ROOT only if it actually exists — local dev may not have it."""
+    return SCANS_ROOT if SCANS_ROOT.is_dir() else None
 
 # ---------------------------------------------------------------------------
 # Flask app
@@ -498,6 +520,7 @@ def create_user():
     user = User(name=name, created_at=time.time())
     db_session.add(user)
     db_session.commit()
+    fs_mirror.sync_user(FS_ROOT, user)
     return json_response(user.to_dict(), 201)
 
 
@@ -540,6 +563,7 @@ def create_stack():
     )
     db_session.add(stack)
     db_session.commit()
+    fs_mirror.sync_stack(FS_ROOT, stack, scans_root=_scans_root_if_present())
     return json_response(stack.to_dict(), 201)
 
 
@@ -563,6 +587,7 @@ def update_stack(stack_id):
         stack.notes = body["notes"]
     stack.updated_at = time.time()
     db_session.commit()
+    fs_mirror.sync_stack(FS_ROOT, stack, scans_root=_scans_root_if_present(), copy_images=False)
     return json_response(stack.to_dict())
 
 
@@ -571,8 +596,10 @@ def delete_stack(stack_id):
     stack = db_session.get(Stack, stack_id)
     if stack is None:
         return json_response({"error": "not found"}, 404)
+    user = stack.user  # capture before delete so the mirror can locate the folder
     db_session.delete(stack)
     db_session.commit()
+    fs_mirror.delete_stack(FS_ROOT, stack_id, user)
     return json_response({"deleted": stack_id})
 
 
@@ -604,6 +631,7 @@ def add_layer(stack_id):
         layer = StackLayer(
             stack_id=stack_id,
             layer_index=layer_index,
+            name=body.get("name"),
             is_shape=True,
             shape_type=body.get("shape_type"),
             shape_data=json.dumps(shape_data) if shape_data is not None else None,
@@ -642,6 +670,7 @@ def add_layer(stack_id):
         layer = StackLayer(
             stack_id=stack_id,
             layer_index=layer_index,
+            name=body.get("name"),
             is_shape=False,
             flake_id=flake_id,
             flake_material=flake_material,
@@ -660,6 +689,7 @@ def add_layer(stack_id):
     db_session.add(layer)
     stack.updated_at = time.time()
     db_session.commit()
+    fs_mirror.sync_layer(FS_ROOT, stack, layer, scans_root=_scans_root_if_present())
     return json_response(layer.to_dict(), 201)
 
 
@@ -678,6 +708,8 @@ def update_layer(stack_id, layer_id):
         layer.layer_index = int(body["layer_index"])
     if "image_filename" in body:
         layer.image_filename = body["image_filename"]
+    if "name" in body:
+        layer.name = body["name"] or None
     # Shape-specific updatable fields
     if "shape_color" in body:
         layer.shape_color = body["shape_color"]
@@ -688,6 +720,8 @@ def update_layer(stack_id, layer_id):
     if stack:
         stack.updated_at = time.time()
     db_session.commit()
+    if stack is not None:
+        fs_mirror.sync_stack(FS_ROOT, stack, scans_root=_scans_root_if_present(), copy_images=False)
     return json_response(layer.to_dict())
 
 
@@ -701,6 +735,8 @@ def delete_layer(stack_id, layer_id):
     if stack:
         stack.updated_at = time.time()
     db_session.commit()
+    if stack is not None:
+        fs_mirror.delete_layer(FS_ROOT, stack, layer_id)
     return json_response({"deleted": layer_id})
 
 
@@ -720,6 +756,7 @@ def reorder_layers(stack_id):
     db_session.commit()
     # Return the updated stack
     db_session.refresh(stack)
+    fs_mirror.sync_stack(FS_ROOT, stack, scans_root=_scans_root_if_present(), copy_images=False)
     return json_response(stack.to_dict(include_layers=True))
 
 
