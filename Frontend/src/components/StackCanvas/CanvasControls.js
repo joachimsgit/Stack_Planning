@@ -1,4 +1,9 @@
-import { Slider, Button, Text, Group, Stack, Divider } from "@mantine/core";
+import { Slider, Button, Text, Group, Stack, Divider, NumberInput } from "@mantine/core";
+
+const normalizeRotation = (r) => {
+  const mod = ((Number(r) || 0) % 360 + 360) % 360;
+  return Math.round(mod * 100) / 100;
+};
 
 const DISPLAY_BUTTONS = [
   { key: "background", label: "Background" },
@@ -98,13 +103,24 @@ function CanvasControls({ layer, displayModes, onToggleMode, onSetDisplayColor, 
           <Divider />
 
           <div>
-            <Group position="apart">
+            <Group position="apart" align="center" noWrap>
               <Text size="xs" weight={500}>Rotation</Text>
-              <Text size="xs" color="dimmed">{layer.rotation.toFixed(0)}°</Text>
+              <NumberInput
+                value={normalizeRotation(layer.rotation)}
+                onChange={(val) => {
+                  if (val === "" || val === null || val === undefined) return;
+                  onUpdateTransform({ rotation: Number(val) });
+                }}
+                min={0} max={360} step={0.01} precision={2}
+                size="xs"
+                hideControls
+                rightSection={<Text size="xs" color="dimmed" pr={6}>°</Text>}
+                styles={{ input: { width: 74, textAlign: "right" } }}
+              />
             </Group>
             <Slider
-              min={-180} max={180} step={1}
-              value={layer.rotation}
+              min={0} max={360} step={0.01} precision={2}
+              value={normalizeRotation(layer.rotation)}
               onChange={(val) => onUpdateTransform({ rotation: val })}
               size="xs" label={null}
             />

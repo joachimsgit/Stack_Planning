@@ -10,7 +10,7 @@ import {
   IconEye,
   IconEyeOff,
 } from "@tabler/icons-react";
-import { flakeImageUrl, fetchFlakeNotes } from "../../utils/api";
+import { flakeImageUrl, fetchFlakeNotes, resolveLocalImageUrl } from "../../utils/api";
 import FlakeInfoModal from "./FlakeInfoModal";
 
 const MATERIAL_COLORS = {
@@ -22,7 +22,7 @@ const MATERIAL_COLORS = {
   WS2: "teal",
 };
 
-function LayerRow({ layer, isActive, onSelect, onDelete, onMoveUp, onMoveDown, onInfo, isFirst, isLast, isHidden, onToggleVisibility }) {
+function LayerRow({ layer, isActive, isSelected, onSelect, onDelete, onMoveUp, onMoveDown, onInfo, isFirst, isLast, isHidden, onToggleVisibility }) {
   const isShape = !!layer.is_shape;
   const isLocal = !!layer.is_local;
   const [notesPreview, setNotesPreview] = useState("");
@@ -54,7 +54,9 @@ function LayerRow({ layer, isActive, onSelect, onDelete, onMoveUp, onMoveDown, o
   }[layer.shape_type] || "orange";
   const badgeColor = isShape ? shapeBadgeColor : (MATERIAL_COLORS[material] || "violet");
 
-  const imgUrl = isShape ? null : (layer.local_image_url || flakeImageUrl(layer.flake_path, "eval_img.jpg"));
+  const imgUrl = isShape
+    ? null
+    : (resolveLocalImageUrl(layer.local_image_url) || flakeImageUrl(layer.flake_path, "eval_img.jpg"));
 
   const subtext = isShape
     ? null
@@ -64,8 +66,8 @@ function LayerRow({ layer, isActive, onSelect, onDelete, onMoveUp, onMoveDown, o
 
   return (
     <div
-      className={`layerRow ${isActive ? "layerRowActive" : ""}`}
-      onClick={onSelect}
+      className={`layerRow ${isActive ? "layerRowActive" : ""} ${isSelected && !isActive ? "layerRowSelected" : ""}`}
+      onClick={(e) => onSelect(e)}
     >
       {/* Top action row — visibility + info, prominently placed */}
       <div className="layerRowTopActions" onClick={(e) => e.stopPropagation()}>
@@ -129,7 +131,7 @@ function LayerRow({ layer, isActive, onSelect, onDelete, onMoveUp, onMoveDown, o
   );
 }
 
-function StackComposer({ layers, activeLayerIndex, onSelectLayer, onDeleteLayer, onReorderLayers, onAddLayer, hiddenLayers, onToggleLayerVisibility }) {
+function StackComposer({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onDeleteLayer, onReorderLayers, onAddLayer, hiddenLayers, onToggleLayerVisibility }) {
   const sorted = [...layers].sort((a, b) => a.layer_index - b.layer_index);
   const [infoLayer, setInfoLayer] = useState(null);
 
@@ -175,7 +177,17 @@ function StackComposer({ layers, activeLayerIndex, onSelectLayer, onDeleteLayer,
               key={layer.id}
               layer={layer}
               isActive={layer.layer_index === activeLayerIndex}
-              onSelect={() => layer.layer_index === activeLayerIndex ? onSelectLayer(null) : onSelectLayer(layer.layer_index)}
+              isSelected={selectedLayerIds ? selectedLayerIds.has(layer.id) : false}
+              onSelect={(e) => {
+                const multi = e && (e.ctrlKey || e.metaKey);
+                if (multi) {
+                  onSelectLayer(layer.layer_index, { toggle: true });
+                } else if (layer.layer_index === activeLayerIndex) {
+                  onSelectLayer(null);
+                } else {
+                  onSelectLayer(layer.layer_index);
+                }
+              }}
               onDelete={() => onDeleteLayer(layer.id)}
               onMoveUp={() => handleMoveUp(idx)}
               onMoveDown={() => handleMoveDown(idx)}

@@ -10,7 +10,7 @@ const NATIVE_IMAGE_WIDTH_PX = 1944;
 const DISPLAY_IMAGE_WIDTH = 900;
 const UM_PER_CANVAS_PX = (UM_PER_PX * NATIVE_IMAGE_WIDTH_PX) / DISPLAY_IMAGE_WIDTH;
 
-function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden }) {
+function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden, inGroup, getGroupSnapshot, onUpdateManyLayers }) {
   const dragStart = useRef(null);
   const svgRef = useRef(null);
 
@@ -19,18 +19,30 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
       e.preventDefault();
       e.stopPropagation();
       onSelect();
+      const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
       dragStart.current = {
         clientX: e.clientX,
         clientY: e.clientY,
         startX: layer.pos_x,
         startY: layer.pos_y,
+        groupSnap,
       };
       const onMove = (me) => {
         if (!dragStart.current) return;
-        onUpdateTransform({
-          pos_x: dragStart.current.startX + (me.clientX - dragStart.current.clientX) / (zoom ?? 1),
-          pos_y: dragStart.current.startY + (me.clientY - dragStart.current.clientY) / (zoom ?? 1),
-        });
+        const dx = (me.clientX - dragStart.current.clientX) / (zoom ?? 1);
+        const dy = (me.clientY - dragStart.current.clientY) / (zoom ?? 1);
+        if (dragStart.current.groupSnap && onUpdateManyLayers) {
+          onUpdateManyLayers(
+            dragStart.current.groupSnap.map((s) => ({
+              id: s.id, pos_x: s.pos_x + dx, pos_y: s.pos_y + dy,
+            }))
+          );
+        } else {
+          onUpdateTransform({
+            pos_x: dragStart.current.startX + dx,
+            pos_y: dragStart.current.startY + dy,
+          });
+        }
       };
       const onUp = () => {
         dragStart.current = null;
@@ -40,7 +52,7 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
     },
-    [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform, zoom]
+    [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform, zoom, inGroup, getGroupSnapshot, onUpdateManyLayers]
   );
 
   // Returns a pointerdown handler for the rotation handle.
@@ -58,11 +70,18 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
 
     const startAngle = Math.atan2(e.clientY - screenCY, e.clientX - screenCX);
     const startRotation = layer.rotation || 0;
+    const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
 
     const onMove = (me) => {
       const angle = Math.atan2(me.clientY - screenCY, me.clientX - screenCX);
       const delta = (angle - startAngle) * 180 / Math.PI;
-      onUpdateTransform({ rotation: startRotation + delta });
+      if (groupSnap && onUpdateManyLayers) {
+        onUpdateManyLayers(
+          groupSnap.map((s) => ({ id: s.id, rotation: s.rotation + delta }))
+        );
+      } else {
+        onUpdateTransform({ rotation: startRotation + delta });
+      }
     };
 
     const onUp = () => {
@@ -302,7 +321,7 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
         overflow: "visible",
         zIndex: layer.layer_index + 1,
         opacity: layer.opacity,
-        pointerEvents: isActive ? "auto" : "none",
+        pointerEvents: isActive || inGroup ? "auto" : "none",
         display: hidden ? "none" : undefined,
       }}
     >

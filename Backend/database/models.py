@@ -11,12 +11,16 @@ class FlakeNote(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     flake_id = Column(Integer, nullable=False, unique=True, index=True)
     notes = Column(Text, nullable=True)
+    # Local override of the flake's scan_user. When set, the frontend shows
+    # this in place of the scan_user reported by the GMM backend.
+    user_override = Column(String(255), nullable=True)
     updated_at = Column(Float, nullable=False, default=lambda: time.time())
 
     def to_dict(self):
         return {
             "flake_id": self.flake_id,
             "notes": self.notes,
+            "user_override": self.user_override,
             "updated_at": self.updated_at,
         }
 
@@ -102,6 +106,10 @@ class StackLayer(Base):
     contrast = Column(Float, nullable=False, default=1.0)
     image_filename = Column(String(64), nullable=False, default="eval_img.jpg")
 
+    # Imported-image layer (user uploaded a local file rather than picking a flake)
+    is_local = Column(Boolean, nullable=False, default=False)
+    local_image_url = Column(String(512), nullable=True)
+
     # Shape-specific fields (NULL for regular flake layers)
     is_shape = Column(Boolean, nullable=False, default=False)
     shape_type = Column(String(32), nullable=True)        # "rect" | "freehand"
@@ -137,4 +145,6 @@ class StackLayer(Base):
             d["flake_thickness"] = self.flake_thickness
             d["flake_path"] = self.flake_path
             d["image_filename"] = self.image_filename
+            d["is_local"] = bool(self.is_local)
+            d["local_image_url"] = self.local_image_url
         return d

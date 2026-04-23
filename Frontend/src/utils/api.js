@@ -25,6 +25,27 @@ export function flakeImageUrl(flakePath, filename = "eval_img.jpg") {
   return `${BASE}/proxy/image?flake_path=${encodeURIComponent(flakePath)}&filename=${encodeURIComponent(filename)}`;
 }
 
+// Local uploads live on the Stack Planning backend. `local_image_url` is stored
+// as a server-relative path (e.g. "/uploads/<hex>.png"); resolve it to a full
+// URL the browser can load. Blob and data URLs pass through unchanged so legacy
+// client-only layers still render during a session.
+export function resolveLocalImageUrl(url) {
+  if (!url) return null;
+  if (/^(https?:|blob:|data:)/i.test(url)) return url;
+  return `${BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+export async function uploadImage(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${BASE}/uploads`, { method: "POST", body: fd });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
 export function flakeCropUrl(flakePath) {
   if (!flakePath) return null;
   return `${BASE}/proxy/crop?flake_path=${encodeURIComponent(flakePath)}`;
@@ -155,9 +176,11 @@ export function fetchFlakeNotes(flakeId) {
   return apiFetch(`/flakes/${flakeId}/notes`);
 }
 
-export function saveFlakeNotes(flakeId, notes) {
+export function saveFlakeNotes(flakeId, payload) {
+  // payload may contain { notes } and/or { user_override }
+  const body = typeof payload === "string" ? { notes: payload } : payload;
   return apiFetch(`/flakes/${flakeId}/notes`, {
     method: "PUT",
-    body: JSON.stringify({ notes }),
+    body: JSON.stringify(body),
   });
 }

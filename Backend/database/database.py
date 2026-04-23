@@ -39,11 +39,18 @@ def run_migrations(engine):
             ("shape_color",        "TEXT"),
             ("shape_stroke_width", "REAL DEFAULT 2.0"),
             ("name",               "TEXT"),
+            ("is_local",           "INTEGER NOT NULL DEFAULT 0"),
+            ("local_image_url",    "TEXT"),
         ]
         for col_name, col_def in shape_migrations:
             if col_name not in layers_cols:
                 conn.execute(text(f"ALTER TABLE stack_layers ADD COLUMN {col_name} {col_def}"))
         conn.commit()
+
+        flake_notes_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(flake_notes)"))}
+        if "user_override" not in flake_notes_cols:
+            conn.execute(text("ALTER TABLE flake_notes ADD COLUMN user_override TEXT"))
+            conn.commit()
 
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_stacks_user_id ON stacks (user_id)"

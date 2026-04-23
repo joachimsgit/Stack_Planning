@@ -30,7 +30,8 @@ const UM_PER_CANVAS_PX = (UM_PER_PX * NATIVE_IMAGE_WIDTH_PX) / DISPLAY_IMAGE_WID
 // Nice round values used to auto-select scale bar label
 const NICE_UM = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 
-function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, onAddShape, hiddenLayers }) {
+function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onUpdateLayer, onUpdateManyLayers, onAddShape, hiddenLayers }) {
+  const groupIds = selectedLayerIds || new Set();
   const sorted = [...layers].sort((a, b) => a.layer_index - b.layer_index);
   const activeLayer = sorted.find((l) => l.layer_index === activeLayerIndex) || null;
 
@@ -208,6 +209,7 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
           opacity: 1, brightness: 1, contrast: 1,
           flake_material: null, flake_id: null, flake_path: null,
         });
+        setActiveTool(null);
       };
 
       document.addEventListener("pointermove", onMove);
@@ -254,6 +256,7 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
       if (next.length === 2) {
         persistMeasurement("distance", next);
         commit([]);
+        setActiveTool(null);
       } else {
         commit(next);
       }
@@ -263,6 +266,7 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
       if (next.length === 3) {
         persistMeasurement("angle", next);
         commit([]);
+        setActiveTool(null);
       } else {
         commit(next);
       }
@@ -270,9 +274,12 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
       if (prev.length >= 3) {
         const dxp = pos.x - prev[0].x;
         const dyp = pos.y - prev[0].y;
-        if (dxp * dxp + dyp * dyp < 100) {
+        // Close-target hit radius scales with zoom so it matches the 8-screen-px visual marker
+        const closeR = 8 / zoomRef.current;
+        if (dxp * dxp + dyp * dyp < closeR * closeR) {
           persistMeasurement("polygon", prev);
           commit([]);
+          setActiveTool(null);
           return;
         }
       }
@@ -287,7 +294,10 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
   // Polygon: close on double-click or Enter, cancel on Escape
   const closePolygon = useCallback(() => {
     const prev = toolPointsRef.current;
-    if (prev.length >= 3) persistMeasurement("polygon", prev);
+    if (prev.length >= 3) {
+      persistMeasurement("polygon", prev);
+      setActiveTool(null);
+    }
     toolPointsRef.current = [];
     setToolPoints([]);
   }, [persistMeasurement]);
@@ -467,6 +477,19 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
 
             {sorted.map((layer, idx) => {
               const isHidden = hiddenLayers && hiddenLayers.has(layer.id);
+              const inGroup = groupIds.size > 1 && groupIds.has(layer.id);
+              // Clicking a layer already in the multi-selection must preserve
+              // the selection so the user can drag the whole group; otherwise
+              // the click collapses selection to just this layer.
+              const handleSelect = () => {
+                if (inGroup) return;
+                onSelectLayer(layer.layer_index);
+              };
+              const groupSnapshotProvider = inGroup
+                ? () => sortedRef.current
+                    .filter((l) => groupIds.has(l.id))
+                    .map((l) => ({ id: l.id, pos_x: l.pos_x || 0, pos_y: l.pos_y || 0, rotation: l.rotation || 0 }))
+                : null;
               if (layer.is_shape) {
                 return (
                   <ShapeLayer
@@ -474,9 +497,12 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
                     layer={layer}
                     isActive={layer.layer_index === activeLayerIndex}
                     zoom={zoom}
-                    onSelect={() => onSelectLayer(layer.layer_index)}
+                    onSelect={handleSelect}
                     onUpdateTransform={(data) => onUpdateLayer(layer.id, data)}
                     hidden={isHidden}
+                    inGroup={inGroup}
+                    getGroupSnapshot={groupSnapshotProvider}
+                    onUpdateManyLayers={onUpdateManyLayers}
                   />
                 );
               }
@@ -488,9 +514,12 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
                   isBottom={idx === 0}
                   displayModes={getDisplayModes(layer.id)}
                   zoom={zoom}
-                  onSelect={() => onSelectLayer(layer.layer_index)}
+                  onSelect={handleSelect}
                   onUpdateTransform={(data) => onUpdateLayer(layer.id, data)}
                   hidden={isHidden}
+                  inGroup={inGroup}
+                  getGroupSnapshot={groupSnapshotProvider}
+                  onUpdateManyLayers={onUpdateManyLayers}
                 />
               );
             })}
@@ -536,8 +565,8 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
                 <g>
                   {toolPoints.map((p, i) => (
                     <g key={i}>
-                      <circle cx={p.x} cy={p.y} r={5} fill="white" />
-                      <circle cx={p.x} cy={p.y} r={4} fill={drawColor} stroke="rgba(0,0,0,0.5)" strokeWidth={1} />
+                      <circle cx={p.x} cy={p.y} r={5 / zoom} fill="white" />
+                      <circle cx={p.x} cy={p.y} r={4 / zoom} fill={drawColor} stroke="rgba(0,0,0,0.5)" strokeWidth={1 / zoom} />
                     </g>
                   ))}
 
@@ -624,10 +653,10 @@ function StackCanvas({ layers, activeLayerIndex, onSelectLayer, onUpdateLayer, o
                       );
                     }
                     if (toolPoints.length >= 3 && toolHover) {
-                      // Visual cue for the close-target
+                      // Visual cue for the close-target — kept visually constant across zoom levels
                       segs.push(
-                        <circle key="close" cx={toolPoints[0].x} cy={toolPoints[0].y} r={8}
-                          fill="none" stroke={drawColor} strokeWidth={1.5} strokeDasharray="2 2" />
+                        <circle key="close" cx={toolPoints[0].x} cy={toolPoints[0].y} r={8 / zoom}
+                          fill="none" stroke={drawColor} strokeWidth={1.5 / zoom} strokeDasharray={`${2 / zoom} ${2 / zoom}`} />
                       );
                     }
                     return <>{segs}</>;

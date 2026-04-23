@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { Modal, Text, Badge, Grid, Loader, Group, Button, SimpleGrid, Textarea } from "@mantine/core";
-import { IconStar, IconAlertTriangle } from "@tabler/icons-react";
+import { Modal, Text, Badge, Grid, Loader, Group, Button, SimpleGrid, Textarea, TextInput, ActionIcon } from "@mantine/core";
+import { IconStar, IconAlertTriangle, IconPencil, IconCheck, IconX } from "@tabler/icons-react";
 import { fetchFlakes, flakeImageUrl, fetchFlakeNotes, saveFlakeNotes } from "../../utils/api";
 
 const MATERIAL_COLORS = {
@@ -37,6 +37,10 @@ function FlakeInfoModal({ layer, opened, onClose }) {
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesSaved, setNotesSaved] = useState(false);
+  const [userOverride, setUserOverride] = useState(null);
+  const [editingUser, setEditingUser] = useState(false);
+  const [userInput, setUserInput] = useState("");
+  const [userSaving, setUserSaving] = useState(false);
 
   useEffect(() => {
     if (!opened || !layer) return;
@@ -44,12 +48,17 @@ function FlakeInfoModal({ layer, opened, onClose }) {
     setLoading(true);
     setNotes("");
     setNotesSaved(false);
+    setUserOverride(null);
+    setEditingUser(false);
     fetchFlakes({ flake_id: layer.flake_id })
       .then((results) => setFlake(results?.[0] ?? null))
       .catch(() => setFlake(null))
       .finally(() => setLoading(false));
     fetchFlakeNotes(layer.flake_id)
-      .then((data) => setNotes(data.notes || ""))
+      .then((data) => {
+        setNotes(data.notes || "");
+        setUserOverride(data.user_override ?? null);
+      })
       .catch(() => {});
   }, [opened, layer]);
 
@@ -61,10 +70,22 @@ function FlakeInfoModal({ layer, opened, onClose }) {
 
   function handleSaveNotes() {
     setNotesSaving(true);
-    saveFlakeNotes(layer.flake_id, notes)
+    saveFlakeNotes(layer.flake_id, { notes })
       .then(() => { setNotesSaved(true); setTimeout(() => setNotesSaved(false), 2000); })
       .catch(() => {})
       .finally(() => setNotesSaving(false));
+  }
+
+  function handleSaveUser() {
+    const trimmed = (userInput || "").trim();
+    setUserSaving(true);
+    saveFlakeNotes(layer.flake_id, { user_override: trimmed })
+      .then((data) => {
+        setUserOverride(data.user_override ?? null);
+        setEditingUser(false);
+      })
+      .catch(() => {})
+      .finally(() => setUserSaving(false));
   }
 
   if (!layer) return null;
@@ -152,7 +173,49 @@ function FlakeInfoModal({ layer, opened, onClose }) {
               <InfoRow label="Used"           value={f?.flake_used != null ? (f.flake_used ? "Yes" : "No") : null} />
               <InfoRow label="Chip ID"        value={f?.chip_id} />
               <InfoRow label="Scan name"      value={f?.scan_name} />
-              <InfoRow label="Scan user"      value={f?.scan_user} />
+              <Text size="xs" color="dimmed" style={{ fontWeight: 600 }}>Scan user</Text>
+              {editingUser ? (
+                <Group spacing={4} noWrap>
+                  <TextInput
+                    value={userInput}
+                    onChange={(e) => setUserInput(e.currentTarget.value)}
+                    placeholder={f?.scan_user || "user name"}
+                    size="xs"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveUser();
+                      if (e.key === "Escape") setEditingUser(false);
+                    }}
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <ActionIcon size="xs" color="green" loading={userSaving} onClick={handleSaveUser}>
+                    <IconCheck size={12} />
+                  </ActionIcon>
+                  <ActionIcon size="xs" color="red" onClick={() => setEditingUser(false)}>
+                    <IconX size={12} />
+                  </ActionIcon>
+                </Group>
+              ) : (
+                <Group spacing={4} noWrap>
+                  <Text size="xs">
+                    {userOverride || f?.scan_user || "—"}
+                    {userOverride && f?.scan_user && userOverride !== f.scan_user && (
+                      <Text span size="xs" color="dimmed"> (was {f.scan_user})</Text>
+                    )}
+                  </Text>
+                  <ActionIcon
+                    size="xs"
+                    variant="subtle"
+                    onClick={() => {
+                      setUserInput(userOverride || f?.scan_user || "");
+                      setEditingUser(true);
+                    }}
+                    title="Change user"
+                  >
+                    <IconPencil size={12} />
+                  </ActionIcon>
+                </Group>
+              )}
               <InfoRow label="Scan date"      value={scanDate} />
               <InfoRow label="Scan ID"        value={f?.scan_id} />
             </SimpleGrid>

@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState, useEffect } from "react";
-import { flakeImageUrl, flakeMaskedUrl, flakeOutlineUrl, fetchFlakeCentroid } from "../../utils/api";
+import { flakeImageUrl, flakeMaskedUrl, flakeOutlineUrl, fetchFlakeCentroid, resolveLocalImageUrl } from "../../utils/api";
 
-function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, onUpdateTransform, hidden }) {
+function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, onUpdateTransform, hidden, inGroup, getGroupSnapshot, onUpdateManyLayers }) {
   const dragStart = useRef(null);
   const pivotRef = useRef(null);
   const [centroid, setCentroid] = useState({
@@ -41,9 +41,13 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
     userSelect: "none",
     WebkitUserDrag: "none",
     touchAction: "none",
-    pointerEvents: isActive ? "auto" : "none",
-    cursor: isActive ? "grab" : "default",
-    outline: isActive ? "2px dashed rgba(51,154,240,0.7)" : "none",
+    pointerEvents: isActive || inGroup ? "auto" : "none",
+    cursor: isActive || inGroup ? "grab" : "default",
+    outline: isActive
+      ? "2px dashed rgba(51,154,240,0.7)"
+      : inGroup
+      ? "2px dashed rgba(116,192,252,0.7)"
+      : "none",
     lineHeight: 0,
     display: hidden ? "none" : undefined,
   };
@@ -54,11 +58,14 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       e.stopPropagation(); // prevent bubbling to container's pan/deselect handler
       onSelect();
 
+      const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
+
       dragStart.current = {
         clientX: e.clientX,
         clientY: e.clientY,
         startX: layer.pos_x,
         startY: layer.pos_y,
+        groupSnap,
       };
 
       const onMove = (moveEvent) => {
@@ -67,10 +74,18 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
         // because the container is CSS-scaled so 1 canvas px = zoom screen px.
         const dx = (moveEvent.clientX - dragStart.current.clientX) / (zoom ?? 1);
         const dy = (moveEvent.clientY - dragStart.current.clientY) / (zoom ?? 1);
-        onUpdateTransform({
-          pos_x: dragStart.current.startX + dx,
-          pos_y: dragStart.current.startY + dy,
-        });
+        if (dragStart.current.groupSnap && onUpdateManyLayers) {
+          onUpdateManyLayers(
+            dragStart.current.groupSnap.map((s) => ({
+              id: s.id, pos_x: s.pos_x + dx, pos_y: s.pos_y + dy,
+            }))
+          );
+        } else {
+          onUpdateTransform({
+            pos_x: dragStart.current.startX + dx,
+            pos_y: dragStart.current.startY + dy,
+          });
+        }
       };
 
       const onUp = () => {
@@ -82,7 +97,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
     },
-    [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform]
+    [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform, zoom, inGroup, getGroupSnapshot, onUpdateManyLayers]
   );
 
   const onRotatePointerDown = useCallback(
@@ -99,11 +114,18 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
 
       const startAngle = Math.atan2(e.clientY - pivotY, e.clientX - pivotX);
       const startRotation = layer.rotation || 0;
+      const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
 
       const onMove = (me) => {
         const angle = Math.atan2(me.clientY - pivotY, me.clientX - pivotX);
         const delta = (angle - startAngle) * 180 / Math.PI;
-        onUpdateTransform({ rotation: startRotation + delta });
+        if (groupSnap && onUpdateManyLayers) {
+          onUpdateManyLayers(
+            groupSnap.map((s) => ({ id: s.id, rotation: s.rotation + delta }))
+          );
+        } else {
+          onUpdateTransform({ rotation: startRotation + delta });
+        }
       };
 
       const onUp = () => {
@@ -114,7 +136,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
     },
-    [layer.rotation, onUpdateTransform]
+    [layer.rotation, onUpdateTransform, inGroup, getGroupSnapshot, onUpdateManyLayers]
   );
 
   const rotateHandle = isActive && (
@@ -171,7 +193,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
     return (
       <div style={containerStyle} onPointerDown={onPointerDown}>
         <img
-          src={layer.local_image_url}
+          src={resolveLocalImageUrl(layer.local_image_url)}
           alt="Local"
           draggable={false}
           style={{ width: "100%", display: "block" }}

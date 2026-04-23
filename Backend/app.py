@@ -2,6 +2,7 @@ import json
 import os
 import time
 import gzip
+import uuid
 from io import BytesIO
 from pathlib import Path
 from cachetools import LRUCache
@@ -67,6 +68,11 @@ if not os.path.isabs(_db_path):
 FS_ROOT = Path(config.get("fs_root") or os.path.dirname(_db_path))
 SCANS_ROOT = Path(config.get("scans_root", "/scans"))
 FS_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Uploads directory for user-imported layer images (persist across sessions).
+UPLOADS_DIR = FS_ROOT / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 
 # Self-healing metadata re-mirror on boot. Does not recopy flake images.
 fs_mirror.resync_all(db_session, FS_ROOT)
@@ -509,6 +515,33 @@ def proxy_centroid():
 
 
 # ---------------------------------------------------------------------------
+# Local image uploads (persisted on server so they survive sessions)
+# ---------------------------------------------------------------------------
+
+@app.route("/uploads", methods=["POST"])
+def upload_image():
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        return json_response({"error": "no file uploaded"}, 400)
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTS:
+        return json_response({"error": f"unsupported file type: {ext}"}, 400)
+    name = f"{uuid.uuid4().hex}{ext}"
+    dest = UPLOADS_DIR / name
+    file.save(str(dest))
+    return json_response({"url": f"/uploads/{name}", "filename": name})
+
+
+@app.route("/uploads/<path:filename>", methods=["GET"])
+def serve_upload(filename):
+    from flask import send_from_directory
+    # Strip any path components to prevent traversal — only serve files
+    # directly inside UPLOADS_DIR.
+    safe = os.path.basename(filename)
+    return send_from_directory(str(UPLOADS_DIR), safe)
+
+
+# ---------------------------------------------------------------------------
 # User CRUD
 # ---------------------------------------------------------------------------
 
@@ -634,6 +667,7 @@ def add_layer(stack_id):
 
     body = request.get_json(force=True, silent=True) or {}
     is_shape = bool(body.get("is_shape", False))
+    is_local = bool(body.get("is_local", False))
 
     # Default layer_index to one above the current maximum
     existing_max = (
@@ -662,6 +696,23 @@ def add_layer(stack_id):
             opacity=float(body.get("opacity", 1.0)),
             brightness=1.0,
             contrast=1.0,
+        )
+    elif is_local:
+        layer = StackLayer(
+            stack_id=stack_id,
+            layer_index=layer_index,
+            name=body.get("name"),
+            is_shape=False,
+            is_local=True,
+            local_image_url=body.get("local_image_url"),
+            flake_id=None,
+            flake_material=body.get("flake_material") or "Custom",
+            pos_x=body.get("pos_x", 0.0),
+            pos_y=body.get("pos_y", 0.0),
+            rotation=body.get("rotation", 0.0),
+            opacity=body.get("opacity", 1.0),
+            brightness=body.get("brightness", 1.0),
+            contrast=body.get("contrast", 1.0),
         )
     else:
         flake_id = body.get("flake_id")
@@ -787,21 +838,28 @@ def reorder_layers(stack_id):
 def get_flake_notes(flake_id):
     note = db_session.query(FlakeNote).filter(FlakeNote.flake_id == flake_id).first()
     if note is None:
-        return json_response({"flake_id": flake_id, "notes": "", "updated_at": None})
+        return json_response({
+            "flake_id": flake_id,
+            "notes": "",
+            "user_override": None,
+            "updated_at": None,
+        })
     return json_response(note.to_dict())
 
 
 @app.route("/flakes/<int:flake_id>/notes", methods=["PUT"])
 def save_flake_notes(flake_id):
     body = request.get_json(force=True, silent=True) or {}
-    notes_text = body.get("notes", "")
     note = db_session.query(FlakeNote).filter(FlakeNote.flake_id == flake_id).first()
     if note is None:
-        note = FlakeNote(flake_id=flake_id, notes=notes_text, updated_at=time.time())
+        note = FlakeNote(flake_id=flake_id, updated_at=time.time())
         db_session.add(note)
-    else:
-        note.notes = notes_text
-        note.updated_at = time.time()
+    if "notes" in body:
+        note.notes = body.get("notes") or ""
+    if "user_override" in body:
+        value = body.get("user_override")
+        note.user_override = value.strip() if isinstance(value, str) and value.strip() else None
+    note.updated_at = time.time()
     db_session.commit()
     return json_response(note.to_dict())
 

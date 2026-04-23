@@ -45,6 +45,11 @@
   background: rgba(51, 154, 240, 0.05);
 }
 
+.layerRowSelected {
+  border-color: var(--mantine-color-blue-3, #74c0fc);
+  background: rgba(51, 154, 240, 0.08);
+}
+
 .layerRowTopActions {
   display: flex;
   gap: 6px;

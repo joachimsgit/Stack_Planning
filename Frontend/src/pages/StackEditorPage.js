@@ -23,6 +23,7 @@ import {
   deleteLayer,
   reorderLayers,
   updateStack,
+  uploadImage,
 } from "../utils/api";
 
 // Debounce helper — returns a function that delays calling fn by `delay` ms
@@ -46,8 +47,16 @@ function StackEditorPage() {
   const [layers, setLayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeLayerIndex, setActiveLayerIndex] = useState(null);
+  const [selectedLayerIds, setSelectedLayerIds] = useState(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hiddenLayers, setHiddenLayers] = useState(new Set());
+
+  // Kept current so drag callbacks always see the latest layer positions without
+  // recreating the callback on every render.
+  const layersRef = useRef(layers);
+  useEffect(() => { layersRef.current = layers; }, [layers]);
+  const selectedLayerIdsRef = useRef(selectedLayerIds);
+  useEffect(() => { selectedLayerIdsRef.current = selectedLayerIds; }, [selectedLayerIds]);
 
   const handleToggleLayerVisibility = useCallback((layerId) => {
     setHiddenLayers((prev) => {
@@ -57,6 +66,47 @@ function StackEditorPage() {
       return next;
     });
   }, []);
+
+  // Unified selection entry point.
+  //   - handleSelectLayer(layerIndex): select a single layer (or null to clear).
+  //   - handleSelectLayer(layerIndex, { toggle: true }): Ctrl/Cmd-click; toggle
+  //     the layer in the multi-selection without disturbing the rest.
+  const handleSelectLayer = useCallback((layerIndex, opts) => {
+    if (layerIndex === null || layerIndex === undefined) {
+      setActiveLayerIndex(null);
+      setSelectedLayerIds(new Set());
+      return;
+    }
+    const layer = layersRef.current.find((l) => l.layer_index === layerIndex);
+    if (!layer) return;
+    if (opts && opts.toggle) {
+      setSelectedLayerIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(layer.id)) next.delete(layer.id);
+        else next.add(layer.id);
+        return next;
+      });
+      setActiveLayerIndex(layerIndex);
+    } else {
+      setSelectedLayerIds(new Set([layer.id]));
+      setActiveLayerIndex(layerIndex);
+    }
+  }, []);
+
+  // Batch-update several layers at once (used for group drag / rotate).
+  // Each update: { id, pos_x?, pos_y?, rotation? }
+  const handleUpdateManyLayers = useCallback((updates) => {
+    const byId = new Map(updates.map((u) => [u.id, u]));
+    setLayers((prev) =>
+      prev.map((l) => (byId.has(l.id) ? { ...l, ...byId.get(l.id) } : l))
+    );
+    updates.forEach((u) => {
+      const { id, ...data } = u;
+      if (typeof id !== "number") return;
+      debouncedPersistRef.current?.(id, data);
+    });
+  }, []);
+  const debouncedPersistRef = useRef(null);
 
   // Inline stack name editing
   const [editingName, setEditingName] = useState(false);
@@ -92,32 +142,26 @@ function StackEditorPage() {
     }
   };
 
-  const handleImportImage = (e) => {
+  const handleImportImage = async (e) => {
     const file = e.target.files?.[0];
     if (!fileInputRef.current) return;
     fileInputRef.current.value = "";
     if (!file) return;
-    const url = URL.createObjectURL(file);
     const nextIndex = layers.length > 0 ? Math.max(...layers.map((l) => l.layer_index)) + 1 : 1;
-    const localLayer = {
-      id: `local-${Date.now()}`,
-      layer_index: nextIndex,
-      flake_id: null,
-      flake_material: "Custom",
-      flake_size: null,
-      flake_thickness: null,
-      flake_path: null,
-      local_image_url: url,
-      is_local: true,
-      pos_x: 0,
-      pos_y: 0,
-      rotation: 0,
-      opacity: 1,
-      brightness: 1,
-      contrast: 1,
-    };
-    setLayers((prev) => [...prev, localLayer]);
-    setActiveLayerIndex(nextIndex);
+    try {
+      const { url } = await uploadImage(file);
+      const newLayer = await addLayer(id, {
+        is_local: true,
+        local_image_url: url,
+        flake_material: "Custom",
+        layer_index: nextIndex,
+        opacity: 1,
+      });
+      setLayers((prev) => [...prev, newLayer]);
+      setActiveLayerIndex(newLayer.layer_index);
+    } catch (err) {
+      notifications.show({ color: "red", title: "Import failed", message: err.message || "Could not save image" });
+    }
   };
 
   // -----------------------------------------------------------------------
@@ -178,6 +222,7 @@ function StackEditorPage() {
     [id]
   );
   const debouncedPersist = useDebounce(persistLayerUpdate, 300);
+  useEffect(() => { debouncedPersistRef.current = debouncedPersist; }, [debouncedPersist]);
 
   const handleUpdateLayer = useCallback(
     (layerId, data) => {
@@ -319,7 +364,8 @@ function StackEditorPage() {
           <StackComposer
             layers={layers}
             activeLayerIndex={activeLayerIndex}
-            onSelectLayer={setActiveLayerIndex}
+            selectedLayerIds={selectedLayerIds}
+            onSelectLayer={handleSelectLayer}
             onDeleteLayer={handleDeleteLayer}
             onReorderLayers={handleReorderLayers}
             onAddLayer={() => setPickerOpen(true)}
@@ -331,8 +377,10 @@ function StackEditorPage() {
           <StackCanvas
             layers={layers}
             activeLayerIndex={activeLayerIndex}
-            onSelectLayer={setActiveLayerIndex}
+            selectedLayerIds={selectedLayerIds}
+            onSelectLayer={handleSelectLayer}
             onUpdateLayer={handleUpdateLayer}
+            onUpdateManyLayers={handleUpdateManyLayers}
             onAddShape={handleAddShape}
             hiddenLayers={hiddenLayers}
           />
