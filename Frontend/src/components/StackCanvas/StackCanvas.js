@@ -52,6 +52,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   const drawColorRef        = useRef(drawColor);
   const activeToolRef       = useRef(activeTool);
   const sortedRef           = useRef(sorted);
+  const groupIdsRef         = useRef(groupIds);
   const activeLayerRef      = useRef(activeLayer);
   const activeLayerIndexRef = useRef(activeLayerIndex);
   const zoomRef             = useRef(zoom);
@@ -59,6 +60,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   const toolPointsRef       = useRef([]);
 
   useEffect(() => { sortedRef.current = sorted; });
+  useEffect(() => { groupIdsRef.current = groupIds; });
   useEffect(() => { activeLayerRef.current = activeLayer; });
   useEffect(() => { activeLayerIndexRef.current = activeLayerIndex; });
   useEffect(() => { zoomRef.current = zoom; });
@@ -102,7 +104,16 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
       if (key === "r") {
         const layer = activeLayerRef.current;
         if (!layer) return;
-        onUpdateLayer(layer.id, { rotation: layer.rotation + dir * ROTATION_STEP });
+        const gIds = groupIdsRef.current;
+        if (gIds.size > 1 && gIds.has(layer.id)) {
+          onUpdateManyLayers(
+            sortedRef.current
+              .filter((l) => gIds.has(l.id))
+              .map((l) => ({ id: l.id, rotation: (l.rotation || 0) + dir * ROTATION_STEP }))
+          );
+        } else {
+          onUpdateLayer(layer.id, { rotation: (layer.rotation || 0) + dir * ROTATION_STEP });
+        }
       } else if (key === "t") {
         const s = sortedRef.current;
         if (s.length < 2) return;
@@ -115,7 +126,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [onUpdateLayer, onSelectLayer]);
+  }, [onUpdateLayer, onSelectLayer, onUpdateManyLayers]);
 
   // Canvas-relative position helper
   // getBoundingClientRect returns screen-space coords after CSS scale transform,
@@ -364,6 +375,20 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
 
   const handleUpdateTransform = (data) => {
     if (!activeLayer) return;
+    if ("rotation" in data && groupIds.size > 1 && groupIds.has(activeLayer.id)) {
+      // Compute delta from the active layer's current normalized rotation so
+      // moving the slider from 350° to 10° is treated as +20°, not -340°.
+      const curRot = ((activeLayer.rotation || 0) % 360 + 360) % 360;
+      let delta = Number(data.rotation) - curRot;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      onUpdateManyLayers(
+        sorted
+          .filter((l) => groupIds.has(l.id))
+          .map((l) => ({ id: l.id, rotation: (l.rotation || 0) + delta }))
+      );
+      return;
+    }
     onUpdateLayer(activeLayer.id, data);
   };
 
