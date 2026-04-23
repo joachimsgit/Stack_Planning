@@ -12,10 +12,7 @@ const ZOOM_STEP = 0.15;
 const DEFAULT_DISPLAY_MODES = {
   background: false,
   flake: true,
-  bbox: false,
   outline: false,
-  bbox_color: "#ffdd00",
-  outline_color: "#ffdd00",
 };
 
 // ── Scale calibration for 20x images ────────────────────────────────────────

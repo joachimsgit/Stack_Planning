@@ -1,6 +1,18 @@
 import { useRef, useCallback, useState, useEffect } from "react";
 import { flakeImageUrl, flakeMaskedUrl, flakeOutlineUrl, fetchFlakeCentroid, resolveLocalImageUrl } from "../../utils/api";
 
+const MATERIAL_OUTLINE_COLORS = {
+  Graphene: "#000000",
+  hBN:      "#1976D2",
+  CrI3:     "#E65100",
+  WSe2:     "#2E7D32",
+  MoS2:     "#7B1FA2",
+  MoSe2:    "#00838F",
+  WS2:      "#00695C",
+};
+
+const FALLBACK_COLORS = ["#ffdd00", "#E91E63", "#FF5722", "#009688", "#9C27B0", "#3F51B5", "#FF9800"];
+
 function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, onUpdateTransform, hidden, inGroup, getGroupSnapshot, onUpdateManyLayers }) {
   const dragStart = useRef(null);
   const pivotRef = useRef(null);
@@ -205,15 +217,9 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
 
   const rawUrl     = flakeImageUrl(layer.flake_path, "raw_img.png");
   const maskedUrl  = flakeMaskedUrl(layer.flake_path);
-  const outlineUrl = flakeOutlineUrl(layer.flake_path, displayModes.outline_color);
-  const bboxColor  = displayModes.bbox_color || "#ffdd00";
-
-  const bbox = {
-    left:   centroid.bbox_left_pct   ?? 10,
-    top:    centroid.bbox_top_pct    ?? 10,
-    right:  centroid.bbox_right_pct  ?? 90,
-    bottom: centroid.bbox_bottom_pct ?? 90,
-  };
+  const outlineColor = MATERIAL_OUTLINE_COLORS[layer.flake_material]
+    ?? FALLBACK_COLORS[layer.layer_index % FALLBACK_COLORS.length];
+  const outlineUrl = flakeOutlineUrl(layer.flake_path, outlineColor);
 
   const overlayImgStyle = {
     position: "absolute",
@@ -243,33 +249,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
         <img src={maskedUrl} alt="" draggable={false} style={overlayImgStyle} />
       )}
 
-      {/* Bounding box: SVG rectangle using bbox percentages */}
-      {displayModes.bbox && (
-        <svg
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            overflow: "visible",
-            pointerEvents: "none",
-          }}
-        >
-          <rect
-            x={`${bbox.left}%`}
-            y={`${bbox.top}%`}
-            width={`${bbox.right - bbox.left}%`}
-            height={`${bbox.bottom - bbox.top}%`}
-            fill="none"
-            stroke={bboxColor}
-            strokeWidth={2}
-            vectorEffect="non-scaling-stroke"
-          />
-        </svg>
-      )}
-
-      {/* Outline: yellow contour of the flake */}
+      {/* Outline: material-coloured contour of the flake */}
       {displayModes.outline && (
         <img src={outlineUrl} alt="" draggable={false} style={overlayImgStyle} />
       )}
