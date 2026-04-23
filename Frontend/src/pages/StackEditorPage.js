@@ -236,23 +236,35 @@ function StackEditorPage() {
   );
 
   const handleDeleteLayer = async (layerId) => {
-    const removeLocal = () => {
-      setLayers((prev) => {
-        const remaining = prev.filter((l) => l.id !== layerId);
-        if (remaining.length > 0 && !remaining.find((l) => l.layer_index === activeLayerIndex)) {
-          setActiveLayerIndex(remaining[0].layer_index);
-        } else if (remaining.length === 0) {
-          setActiveLayerIndex(null);
-        }
-        return remaining;
-      });
-    };
-    if (typeof layerId === "string") { removeLocal(); return; }
-    try {
-      await deleteLayer(id, layerId);
-      removeLocal();
-    } catch (err) {
-      notifications.show({ color: "red", message: `Failed to delete layer: ${err.message}` });
+    if (typeof layerId !== "string") {
+      try {
+        await deleteLayer(id, layerId);
+      } catch (err) {
+        notifications.show({ color: "red", message: `Failed to delete layer: ${err.message}` });
+        return;
+      }
+    }
+
+    const remaining = layers
+      .filter((l) => l.id !== layerId)
+      .sort((a, b) => a.layer_index - b.layer_index)
+      .map((l, i) => ({ ...l, layer_index: i }));
+
+    setLayers(remaining);
+
+    if (remaining.length === 0) {
+      setActiveLayerIndex(null);
+    } else {
+      const prevActive = layers.find((l) => l.layer_index === activeLayerIndex && l.id !== layerId);
+      const relocated = prevActive && remaining.find((l) => l.id === prevActive.id);
+      setActiveLayerIndex(relocated ? relocated.layer_index : remaining[0].layer_index);
+    }
+
+    const remoteOrder = remaining
+      .filter((l) => typeof l.id === "number")
+      .map((l) => ({ id: l.id, layer_index: l.layer_index }));
+    if (remoteOrder.length > 0) {
+      reorderLayers(id, remoteOrder).catch(() => {});
     }
   };
 
