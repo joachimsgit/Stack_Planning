@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState, useEffect } from "react";
 import { flakeImageUrl, flakeMaskedUrl, flakeOutlineUrl, fetchFlakeCentroid, resolveLocalImageUrl } from "../../utils/api";
+import { getDisplayWidthPx, baseSupportsRemoteOverlay } from "../../utils/calibration";
 
 const MATERIAL_OUTLINE_COLORS = {
   Graphene: "#000000",
@@ -21,18 +22,26 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
     bbox_left_pct: 10, bbox_top_pct: 10, bbox_right_pct: 90, bbox_bottom_pct: 90,
   });
 
+  const baseFilename = layer.canvas_base_filename || "raw_img.png";
+  const userMaskUrl = layer.masks && layer.masks[baseFilename];
+  const hasUserMask = Boolean(userMaskUrl);
+  const supportsRemote = baseSupportsRemoteOverlay(baseFilename);
+
   useEffect(() => {
     if (layer.is_local) return;
     const controller = new AbortController();
-    fetchFlakeCentroid(layer.flake_path, controller.signal)
+    const centroidOpts = hasUserMask
+      ? { layerId: layer.id, imageFilename: baseFilename }
+      : undefined;
+    fetchFlakeCentroid(layer.flake_path, centroidOpts, controller.signal)
       .then(setCentroid)
       .catch(() => {});
     return () => controller.abort();
-  }, [layer.flake_path, layer.is_local]);
+  }, [layer.flake_path, layer.is_local, layer.id, baseFilename, hasUserMask]);
 
   const originX = layer.is_local ? 50 : centroid.cx_pct;
   const originY = layer.is_local ? 50 : centroid.cy_pct;
-  const displayWidth = 900;
+  const displayWidth = layer.is_local ? 900 : getDisplayWidthPx(baseFilename);
 
   const transform = [
     `translate(calc(-${originX}% + ${layer.pos_x}px), calc(-${originY}% + ${layer.pos_y}px))`,
@@ -215,11 +224,15 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
     );
   }
 
-  const rawUrl     = flakeImageUrl(layer.flake_path, "raw_img.png");
-  const maskedUrl  = flakeMaskedUrl(layer.flake_path);
+  const baseUrl    = flakeImageUrl(layer.flake_path, baseFilename);
+  const maskOpts   = hasUserMask ? { layerId: layer.id, imageFilename: baseFilename } : undefined;
+  // Flake/Outline overlays: use user mask if available; fall back to remote mask
+  // only when the base is raw_img.png / eval_img.jpg (same pixel space).
+  const overlaysAvailable = hasUserMask || supportsRemote;
+  const maskedUrl  = overlaysAvailable ? flakeMaskedUrl(layer.flake_path, maskOpts) : null;
   const outlineColor = MATERIAL_OUTLINE_COLORS[layer.flake_material]
     ?? FALLBACK_COLORS[layer.layer_index % FALLBACK_COLORS.length];
-  const outlineUrl = flakeOutlineUrl(layer.flake_path, outlineColor);
+  const outlineUrl = overlaysAvailable ? flakeOutlineUrl(layer.flake_path, outlineColor, maskOpts) : null;
 
   const overlayImgStyle = {
     position: "absolute",
@@ -234,7 +247,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       {/* Layout anchor — always in flow so the div gets a height.
           Visible only when background mode is on; otherwise hidden but still sets size. */}
       <img
-        src={rawUrl}
+        src={baseUrl}
         alt=""
         draggable={false}
         style={{
@@ -245,12 +258,12 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       />
 
       {/* Flake: full-size RGBA with transparent background */}
-      {displayModes.flake && (
+      {displayModes.flake && maskedUrl && (
         <img src={maskedUrl} alt="" draggable={false} style={overlayImgStyle} />
       )}
 
       {/* Outline: material-coloured contour of the flake */}
-      {displayModes.outline && (
+      {displayModes.outline && outlineUrl && (
         <img src={outlineUrl} alt="" draggable={false} style={overlayImgStyle} />
       )}
 

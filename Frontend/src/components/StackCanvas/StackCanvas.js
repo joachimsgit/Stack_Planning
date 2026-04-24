@@ -5,6 +5,11 @@ import { IconLayersIntersect, IconRectangle, IconPencil, IconRuler2, IconAngle, 
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
 import CanvasControls from "./CanvasControls";
+import {
+  MAGNIFICATION_CALIBRATION,
+  REFERENCE_FILENAME,
+  CANONICAL_DISPLAY_WIDTH,
+} from "../../utils/calibration";
 
 const CANVAS_SIZE = 700;
 const ROTATION_STEP = 3;
@@ -15,15 +20,12 @@ const DEFAULT_DISPLAY_MODES = {
   outline: false,
 };
 
-// ── Scale calibration for 20x images ────────────────────────────────────────
-// Camera pixel size at 20x magnification
-const UM_PER_PX = 0.3844;
-// Native camera pixel width of the stored images
-const NATIVE_IMAGE_WIDTH_PX = 1944;
-// CSS width at which LayerImage renders each image (see LayerImage.js displayWidth)
-const DISPLAY_IMAGE_WIDTH = 900;
-// Derived: µm per canvas pixel at zoom = 1
-const UM_PER_CANVAS_PX = (UM_PER_PX * NATIVE_IMAGE_WIDTH_PX) / DISPLAY_IMAGE_WIDTH;
+// ── Scale calibration (shared with LayerImage via utils/calibration.js) ─────
+// The canvas scale bar is anchored to the 20x reference so its µm labels stay
+// stable regardless of which base image any individual layer is showing; each
+// layer's own image is width-scaled relative to this reference.
+const REF_CAL = MAGNIFICATION_CALIBRATION[REFERENCE_FILENAME];
+const UM_PER_CANVAS_PX = (REF_CAL.um_per_px * REF_CAL.native_w) / CANONICAL_DISPLAY_WIDTH;
 // Nice round values used to auto-select scale bar label
 const NICE_UM = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 

@@ -1,4 +1,9 @@
 import { Slider, Button, Text, Group, Stack, Divider, NumberInput } from "@mantine/core";
+import {
+  BASE_IMAGE_ORDER,
+  MAGNIFICATION_CALIBRATION,
+  baseSupportsRemoteOverlay,
+} from "../../utils/calibration";
 
 const normalizeRotation = (r) => {
   const mod = ((Number(r) || 0) % 360 + 360) % 360;
@@ -50,23 +55,57 @@ function CanvasControls({ layer, displayModes, onToggleMode, onSetDisplayColor, 
               </div>
             </>
           ) : (
-            <div>
-              <Text size="xs" weight={500} mb={4}>Display</Text>
-              <Group spacing={4}>
-                {DISPLAY_BUTTONS.map(({ key, label }) => (
-                  <Button
-                    key={key}
-                    size="xs"
-                    compact
-                    variant={displayModes[key] ? "filled" : "default"}
-                    onClick={() => onToggleMode(key)}
-                    disabled={layer.is_local && key !== "background"}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </Group>
-            </div>
+            <>
+              {!layer.is_local && (
+                <div>
+                  <Text size="xs" weight={500} mb={4}>Base image</Text>
+                  <Group spacing={4}>
+                    {BASE_IMAGE_ORDER.map((file) => {
+                      const cal = MAGNIFICATION_CALIBRATION[file];
+                      if (!cal) return null;
+                      const active = (layer.canvas_base_filename || "raw_img.png") === file;
+                      const hasMask = Boolean(layer.masks && layer.masks[file]);
+                      return (
+                        <Button
+                          key={file}
+                          size="xs"
+                          compact
+                          variant={active ? "filled" : "default"}
+                          onClick={() => onUpdateTransform({ canvas_base_filename: file })}
+                          title={hasMask ? "User mask available" : undefined}
+                        >
+                          {cal.label}{hasMask ? " •" : ""}
+                        </Button>
+                      );
+                    })}
+                  </Group>
+                </div>
+              )}
+              <div>
+                <Text size="xs" weight={500} mb={4}>Display</Text>
+                <Group spacing={4}>
+                  {DISPLAY_BUTTONS.map(({ key, label }) => {
+                    const baseFile = layer.canvas_base_filename || "raw_img.png";
+                    const hasMask = Boolean(layer.masks && layer.masks[baseFile]);
+                    const overlaysOk = hasMask || baseSupportsRemoteOverlay(baseFile);
+                    const overlayDisabled = (key === "flake" || key === "outline") && !overlaysOk;
+                    return (
+                      <Button
+                        key={key}
+                        size="xs"
+                        compact
+                        variant={displayModes[key] ? "filled" : "default"}
+                        onClick={() => onToggleMode(key)}
+                        disabled={(layer.is_local && key !== "background") || overlayDisabled}
+                        title={overlayDisabled ? "Generate a watershed mask for this magnification first" : undefined}
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </Group>
+              </div>
+            </>
           )}
 
           <Divider />

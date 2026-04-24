@@ -131,9 +131,14 @@ function LayerRow({ layer, isActive, isSelected, onSelect, onDelete, onMoveUp, o
   );
 }
 
-function StackComposer({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onDeleteLayer, onReorderLayers, onAddLayer, hiddenLayers, onToggleLayerVisibility }) {
+function StackComposer({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onDeleteLayer, onReorderLayers, onAddLayer, hiddenLayers, onToggleLayerVisibility, stackId, onMasksChanged }) {
   const sorted = [...layers].sort((a, b) => a.layer_index - b.layer_index);
-  const [infoLayer, setInfoLayer] = useState(null);
+  const [infoLayerId, setInfoLayerId] = useState(null);
+  // Look up the up-to-date layer object each render so `masks` stays fresh
+  // after a watershed save triggers a parent refetch.
+  const infoLayer = infoLayerId != null
+    ? sorted.find((l) => l.id === infoLayerId) || null
+    : null;
 
   const handleMoveUp = (idx) => {
     if (idx === 0) return;
@@ -191,7 +196,7 @@ function StackComposer({ layers, activeLayerIndex, selectedLayerIds, onSelectLay
               onDelete={() => onDeleteLayer(layer.id)}
               onMoveUp={() => handleMoveUp(idx)}
               onMoveDown={() => handleMoveDown(idx)}
-              onInfo={layer.is_shape ? null : () => setInfoLayer(layer)}
+              onInfo={layer.is_shape ? null : () => setInfoLayerId(layer.id)}
               isFirst={idx === 0}
               isLast={idx === sorted.length - 1}
               isHidden={hiddenLayers ? hiddenLayers.has(layer.id) : false}
@@ -216,7 +221,9 @@ function StackComposer({ layers, activeLayerIndex, selectedLayerIds, onSelectLay
       <FlakeInfoModal
         layer={infoLayer}
         opened={infoLayer !== null}
-        onClose={() => setInfoLayer(null)}
+        onClose={() => setInfoLayerId(null)}
+        stackId={stackId}
+        onMasksChanged={onMasksChanged}
       />
     </div>
   );

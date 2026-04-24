@@ -1,6 +1,6 @@
 import json
 import time
-from sqlalchemy import Boolean, Column, Integer, String, Float, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Integer, String, Float, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database.database import Base
 
@@ -106,6 +106,11 @@ class StackLayer(Base):
     contrast = Column(Float, nullable=False, default=1.0)
     image_filename = Column(String(64), nullable=False, default="eval_img.jpg")
 
+    # Which base image the stack canvas renders for this layer. Independent of
+    # `image_filename` (which is legacy/unused by the canvas) so existing layers
+    # keep their raw_img.png anchor.
+    canvas_base_filename = Column(String(64), nullable=False, default="raw_img.png")
+
     # Imported-image layer (user uploaded a local file rather than picking a flake)
     is_local = Column(Boolean, nullable=False, default=False)
     local_image_url = Column(String(512), nullable=True)
@@ -118,6 +123,11 @@ class StackLayer(Base):
     shape_stroke_width = Column(Float, nullable=True, default=2.0)
 
     stack = relationship("Stack", back_populates="layers")
+    masks = relationship(
+        "LayerMask",
+        back_populates="layer",
+        cascade="all, delete-orphan",
+    )
 
     def to_dict(self):
         d = {
@@ -145,6 +155,31 @@ class StackLayer(Base):
             d["flake_thickness"] = self.flake_thickness
             d["flake_path"] = self.flake_path
             d["image_filename"] = self.image_filename
+            d["canvas_base_filename"] = self.canvas_base_filename or "raw_img.png"
             d["is_local"] = bool(self.is_local)
             d["local_image_url"] = self.local_image_url
+            d["masks"] = {m.image_filename: m.mask_url for m in self.masks}
         return d
+
+
+class LayerMask(Base):
+    """User-painted watershed mask for one (layer, base_image) pair."""
+    __tablename__ = "layer_masks"
+    __table_args__ = (UniqueConstraint("layer_id", "image_filename", name="uq_layer_mask_file"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    layer_id = Column(Integer, ForeignKey("stack_layers.id", ondelete="CASCADE"), nullable=False, index=True)
+    image_filename = Column(String(64), nullable=False)
+    mask_url = Column(String(512), nullable=False)
+    created_at = Column(Float, nullable=False, default=lambda: time.time())
+
+    layer = relationship("StackLayer", back_populates="masks")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "layer_id": self.layer_id,
+            "image_filename": self.image_filename,
+            "mask_url": self.mask_url,
+            "created_at": self.created_at,
+        }

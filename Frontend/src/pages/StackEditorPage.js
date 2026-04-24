@@ -24,6 +24,7 @@ import {
   reorderLayers,
   updateStack,
   uploadImage,
+  fetchLayerMasks,
 } from "../utils/api";
 
 // Debounce helper — returns a function that delays calling fn by `delay` ms
@@ -268,6 +269,24 @@ function StackEditorPage() {
     }
   };
 
+  // Called after WatershedEditor save / discard. Refetch the layer's masks
+  // from the backend and merge them into state so `layer.masks` is current on
+  // the canvas and in the FlakeInfo modal.
+  const handleLayerMasksChanged = useCallback(
+    async (layerId) => {
+      if (typeof layerId !== "number") return;
+      try {
+        const masks = await fetchLayerMasks(id, layerId);
+        setLayers((prev) =>
+          prev.map((l) => (l.id === layerId ? { ...l, masks: masks || {} } : l))
+        );
+      } catch {
+        // ignore — stale masks just mean the user needs to reopen the modal
+      }
+    },
+    [id]
+  );
+
   const handleReorderLayers = async (newOrder) => {
     // Optimistic update for all layers (local + remote)
     setLayers((prev) =>
@@ -383,6 +402,8 @@ function StackEditorPage() {
             onAddLayer={() => setPickerOpen(true)}
             hiddenLayers={hiddenLayers}
             onToggleLayerVisibility={handleToggleLayerVisibility}
+            stackId={id}
+            onMasksChanged={handleLayerMasksChanged}
           />
 
           {/* Centre: canvas */}

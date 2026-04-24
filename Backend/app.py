@@ -21,12 +21,18 @@ _masked_cache: LRUCache = LRUCache(maxsize=256)
 _outline_cache: LRUCache = LRUCache(maxsize=256)
 _centroid_cache: LRUCache = LRUCache(maxsize=512)
 
+# Separate caches for user-mask variants, keyed by (layer_id, image_filename, mask_mtime).
+# Kept separate so the remote-mask caches stay untouched when users generate masks.
+_user_masked_cache: LRUCache = LRUCache(maxsize=128)
+_user_outline_cache: LRUCache = LRUCache(maxsize=128)
+_user_centroid_cache: LRUCache = LRUCache(maxsize=128)
+
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
 from sqlalchemy.orm import subqueryload
 from database.database import create_db_engine, create_session_factory, init_db, run_migrations
-from database.models import User, Stack, StackLayer, FlakeNote
+from database.models import User, Stack, StackLayer, FlakeNote, LayerMask
 from database import filesystem_mirror as fs_mirror
 from services import flake_proxy
 
@@ -73,6 +79,11 @@ FS_ROOT.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR = FS_ROOT / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
+
+# User-painted watershed masks live under uploads/masks so the existing
+# /uploads/<path> route serves them without new plumbing.
+MASKS_DIR = UPLOADS_DIR / "masks"
+MASKS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Self-healing metadata re-mirror on boot. Does not recopy flake images.
 fs_mirror.resync_all(db_session, FS_ROOT)
@@ -195,6 +206,62 @@ def proxy_image():
         return Response(_TRANSPARENT_PNG, content_type="image/png")
 
 
+# ---------------------------------------------------------------------------
+# User-mask helpers (shared by proxy_masked / outline / crop / centroid when a
+# per-layer watershed mask has been saved).
+# ---------------------------------------------------------------------------
+
+def _mask_url_to_path(mask_url: str):
+    """Translate a stored mask_url ('/uploads/masks/<uuid>.png') to a filesystem path.
+
+    Returns None if the URL doesn't point inside MASKS_DIR — guards against traversal.
+    """
+    if not mask_url:
+        return None
+    prefix = "/uploads/"
+    if not mask_url.startswith(prefix):
+        return None
+    rel = mask_url[len(prefix):].replace("\\", "/").lstrip("/")
+    p = (UPLOADS_DIR / rel).resolve()
+    try:
+        p.relative_to(UPLOADS_DIR.resolve())
+    except ValueError:
+        return None
+    return p if p.is_file() else None
+
+
+def _lookup_user_mask(layer_id, image_filename):
+    """Return (LayerMask, Path, mtime) if a saved user mask exists, else None."""
+    if not layer_id or not image_filename:
+        return None
+    session = db_session()
+    try:
+        row = (
+            session.query(LayerMask)
+            .filter_by(layer_id=layer_id, image_filename=image_filename)
+            .one_or_none()
+        )
+    finally:
+        db_session.remove()
+    if row is None:
+        return None
+    path = _mask_url_to_path(row.mask_url)
+    if path is None:
+        return None
+    return row, path, path.stat().st_mtime
+
+
+def _fetch_base_image(flake_path, image_filename):
+    """Fetch a base image (e.g. 20x.png) from the GMM image server as bytes."""
+    import requests as req
+    image_base = config.get("image_url", "").rstrip("/")
+    clean_path = flake_path.replace("\\", "/").strip("/")
+    url = f"{image_base}/{clean_path}/{image_filename}"
+    resp = req.get(url, timeout=15)
+    resp.raise_for_status()
+    return resp.content
+
+
 @app.route("/proxy/crop", methods=["GET"])
 def proxy_crop():
     """Return a tightly-cropped RGBA PNG of the flake with transparent background.
@@ -215,8 +282,45 @@ def proxy_crop():
     except ValueError:
         return json_response({"error": "padding must be an integer"}, 400)
 
+    layer_id = request.args.get("layer_id", type=int)
+    image_filename = request.args.get("image_filename", "")
+
     if not flake_path:
         return Response(_TRANSPARENT_PNG, content_type="image/png")
+
+    user_info = _lookup_user_mask(layer_id, image_filename)
+    if user_info is not None:
+        _row, mask_path, mtime = user_info
+        cache_key_user = ("crop", layer_id, image_filename, mtime, padding)
+        if cache_key_user in _user_masked_cache:
+            return Response(_user_masked_cache[cache_key_user], content_type="image/png")
+        try:
+            img_bytes = _fetch_base_image(flake_path, image_filename)
+            img_arr = np.array(PILImage.open(BytesIO(img_bytes)).convert("RGB"))
+            mask_arr = np.array(PILImage.open(mask_path).convert("L"))
+            flake_pixels = mask_arr > 128
+            if not flake_pixels.any():
+                return Response(_TRANSPARENT_PNG, content_type="image/png")
+            h, w = mask_arr.shape
+            rows_any = np.any(flake_pixels, axis=1)
+            cols_any = np.any(flake_pixels, axis=0)
+            rmin = max(0, int(np.where(rows_any)[0][0]) - padding)
+            rmax = min(h - 1, int(np.where(rows_any)[0][-1]) + padding)
+            cmin = max(0, int(np.where(cols_any)[0][0]) - padding)
+            cmax = min(w - 1, int(np.where(cols_any)[0][-1]) + padding)
+            crop_rgb = img_arr[rmin:rmax + 1, cmin:cmax + 1]
+            crop_mask = flake_pixels[rmin:rmax + 1, cmin:cmax + 1]
+            alpha = np.where(crop_mask, 255, 0).astype(np.uint8)
+            rgba = np.dstack([crop_rgb, alpha])
+            out = PILImage.fromarray(rgba, "RGBA")
+            buf = BytesIO()
+            out.save(buf, format="PNG")
+            png_bytes = buf.getvalue()
+            _user_masked_cache[cache_key_user] = png_bytes
+            return Response(png_bytes, content_type="image/png")
+        except Exception as e:
+            app.logger.warning("User-mask crop failed for layer %s/%s: %s", layer_id, image_filename, e)
+            return Response(_TRANSPARENT_PNG, content_type="image/png")
 
     cache_key = (flake_path, padding)
     if cache_key in _crop_cache:
@@ -303,8 +407,34 @@ def proxy_masked():
     from PIL import Image as PILImage
 
     flake_path = request.args.get("flake_path", "")
+    layer_id = request.args.get("layer_id", type=int)
+    image_filename = request.args.get("image_filename", "")
+
     if not flake_path:
         return Response(_TRANSPARENT_PNG, content_type="image/png")
+
+    user_info = _lookup_user_mask(layer_id, image_filename)
+    if user_info is not None:
+        _row, mask_path, mtime = user_info
+        cache_key_user = (layer_id, image_filename, mtime)
+        if cache_key_user in _user_masked_cache:
+            return Response(_user_masked_cache[cache_key_user], content_type="image/png")
+        try:
+            img_bytes = _fetch_base_image(flake_path, image_filename)
+            img_arr = np.array(PILImage.open(BytesIO(img_bytes)).convert("RGB"))
+            mask_arr = np.array(PILImage.open(mask_path).convert("L"))
+            flake_pixels = mask_arr > 128
+            alpha = np.where(flake_pixels, 255, 0).astype(np.uint8)
+            rgba = np.dstack([img_arr, alpha])
+            out = PILImage.fromarray(rgba, "RGBA")
+            buf = BytesIO()
+            out.save(buf, format="PNG")
+            png_bytes = buf.getvalue()
+            _user_masked_cache[cache_key_user] = png_bytes
+            return Response(png_bytes, content_type="image/png")
+        except Exception as e:
+            app.logger.warning("User-mask masked failed for layer %s/%s: %s", layer_id, image_filename, e)
+            return Response(_TRANSPARENT_PNG, content_type="image/png")
 
     if flake_path in _masked_cache:
         return Response(_masked_cache[flake_path], content_type="image/png")
@@ -353,6 +483,9 @@ def proxy_outline():
     from PIL import Image as PILImage
 
     flake_path = request.args.get("flake_path", "")
+    layer_id = request.args.get("layer_id", type=int)
+    image_filename = request.args.get("image_filename", "")
+
     if not flake_path:
         return Response(_TRANSPARENT_PNG, content_type="image/png")
 
@@ -373,13 +506,6 @@ def proxy_outline():
         except ValueError:
             pass
 
-    cache_key = (flake_path, r, g, b)
-    if cache_key in _outline_cache:
-        return Response(_outline_cache[cache_key], content_type="image/png")
-
-    image_base = config.get("image_url", "").rstrip("/")
-    clean_path = flake_path.replace("\\", "/").strip("/")
-
     def _dilate(m, iters):
         result = m.copy()
         for _ in range(iters):
@@ -389,6 +515,41 @@ def proxy_outline():
             right = np.zeros_like(result); right[:, 1:]  = result[:, :-1]
             result = result | up | down | left | right
         return result
+
+    user_info = _lookup_user_mask(layer_id, image_filename)
+    if user_info is not None:
+        _row, mask_path, mtime = user_info
+        cache_key_user = (layer_id, image_filename, mtime, r, g, b)
+        if cache_key_user in _user_outline_cache:
+            return Response(_user_outline_cache[cache_key_user], content_type="image/png")
+        try:
+            mask_arr = np.array(PILImage.open(mask_path).convert("L"))
+            h, w = mask_arr.shape
+            flake_pixels = mask_arr > 128
+            if not flake_pixels.any():
+                return Response(_TRANSPARENT_PNG, content_type="image/png")
+            border = _dilate(flake_pixels, 4) & ~flake_pixels
+            rgba = np.zeros((h, w, 4), dtype=np.uint8)
+            rgba[border, 0] = r
+            rgba[border, 1] = g
+            rgba[border, 2] = b
+            rgba[border, 3] = 255
+            out = PILImage.fromarray(rgba, "RGBA")
+            buf = BytesIO()
+            out.save(buf, format="PNG")
+            png_bytes = buf.getvalue()
+            _user_outline_cache[cache_key_user] = png_bytes
+            return Response(png_bytes, content_type="image/png")
+        except Exception as e:
+            app.logger.warning("User-mask outline failed for layer %s/%s: %s", layer_id, image_filename, e)
+            return Response(_TRANSPARENT_PNG, content_type="image/png")
+
+    cache_key = (flake_path, r, g, b)
+    if cache_key in _outline_cache:
+        return Response(_outline_cache[cache_key], content_type="image/png")
+
+    image_base = config.get("image_url", "").rstrip("/")
+    clean_path = flake_path.replace("\\", "/").strip("/")
 
     try:
         mask_resp = req.get(f"{image_base}/{clean_path}/flake_mask.png", timeout=15)
@@ -452,8 +613,50 @@ def proxy_centroid():
     }
 
     flake_path = request.args.get("flake_path", "")
+    layer_id = request.args.get("layer_id", type=int)
+    image_filename = request.args.get("image_filename", "")
+
     if not flake_path:
         return jsonify(_fallback)
+
+    user_info = _lookup_user_mask(layer_id, image_filename)
+    if user_info is not None:
+        _row, mask_path, mtime = user_info
+        cache_key_user = (layer_id, image_filename, mtime)
+        if cache_key_user in _user_centroid_cache:
+            return jsonify(_user_centroid_cache[cache_key_user])
+        try:
+            mask_arr = np.array(PILImage.open(mask_path).convert("L"))
+            h, w = mask_arr.shape
+            flake_pixels = mask_arr > 128
+            if not flake_pixels.any():
+                result = _fallback
+            else:
+                rows_idx, cols_idx = np.where(flake_pixels)
+                cx_px = float(cols_idx.mean())
+                cy_px = float(rows_idx.mean())
+                rmin = max(0, int(rows_idx.min()) - PADDING)
+                rmax = min(h - 1, int(rows_idx.max()) + PADDING)
+                cmin = max(0, int(cols_idx.min()) - PADDING)
+                cmax = min(w - 1, int(cols_idx.max()) + PADDING)
+                crop_w = cmax - cmin + 1
+                crop_h = rmax - rmin + 1
+                result = {
+                    "cx_pct":      cx_px / w * 100,
+                    "cy_pct":      cy_px / h * 100,
+                    "crop_cx_pct": (cx_px - cmin) / crop_w * 100,
+                    "crop_cy_pct": (cy_px - rmin) / crop_h * 100,
+                    "crop_scale":  crop_w / w,
+                    "bbox_left_pct":   cmin / w * 100,
+                    "bbox_top_pct":    rmin / h * 100,
+                    "bbox_right_pct":  (cmax + 1) / w * 100,
+                    "bbox_bottom_pct": (rmax + 1) / h * 100,
+                }
+            _user_centroid_cache[cache_key_user] = result
+            return jsonify(result)
+        except Exception as e:
+            app.logger.warning("User-mask centroid failed for layer %s/%s: %s", layer_id, image_filename, e)
+            return jsonify(_fallback)
 
     # Use cached value only if it contains the newer bbox fields
     if flake_path in _centroid_cache and "bbox_left_pct" in _centroid_cache[flake_path]:
@@ -534,11 +737,148 @@ def upload_image():
 
 @app.route("/uploads/<path:filename>", methods=["GET"])
 def serve_upload(filename):
-    from flask import send_from_directory
-    # Strip any path components to prevent traversal — only serve files
-    # directly inside UPLOADS_DIR.
-    safe = os.path.basename(filename)
-    return send_from_directory(str(UPLOADS_DIR), safe)
+    from flask import send_from_directory, abort
+    # Normalise and reject anything that would escape UPLOADS_DIR. Subdirectories
+    # under uploads/ are allowed (e.g. uploads/masks/<uuid>.png).
+    candidate = (UPLOADS_DIR / filename).resolve()
+    try:
+        candidate.relative_to(UPLOADS_DIR.resolve())
+    except ValueError:
+        abort(404)
+    rel = candidate.relative_to(UPLOADS_DIR.resolve()).as_posix()
+    return send_from_directory(str(UPLOADS_DIR), rel)
+
+
+# ---------------------------------------------------------------------------
+# User-painted watershed masks (per layer, per base image)
+# ---------------------------------------------------------------------------
+
+def _invalidate_user_mask_caches(layer_id, image_filename):
+    """Drop any cached render that was keyed on this (layer_id, image_filename).
+
+    The three user-mask caches use slightly different key tuple shapes (crop has a
+    padding term, outline has an rgb triple). Since every key does contain both
+    layer_id and image_filename somewhere, the cheapest correct thing is to scan.
+    """
+    for cache in (_user_masked_cache, _user_outline_cache, _user_centroid_cache):
+        stale = [
+            k for k in list(cache.keys())
+            if isinstance(k, tuple) and layer_id in k and image_filename in k
+        ]
+        for k in stale:
+            cache.pop(k, None)
+
+
+@app.route("/stacks/<int:stack_id>/layers/<int:layer_id>/watershed", methods=["POST"])
+def create_watershed_mask(stack_id, layer_id):
+    """Run cv2.watershed on a user-curated base image and persist the resulting mask.
+
+    Body JSON:
+      { image_filename: "20x.png",
+        strokes: { foreground: [[[x,y], ...], ...], background: [[[x,y], ...], ...] },
+        brush_radius: 15 }
+    Coordinates are in the base image's native pixel space.
+    """
+    from services.watershed import run_watershed
+
+    layer = db_session.get(StackLayer, layer_id)
+    if layer is None or layer.stack_id != stack_id:
+        return json_response({"error": "layer not found"}, 404)
+    if not layer.flake_path:
+        return json_response({"error": "layer has no flake_path"}, 400)
+
+    body = request.get_json(force=True, silent=True) or {}
+    image_filename = (body.get("image_filename") or "").strip()
+    strokes = body.get("strokes") or {}
+    fg = strokes.get("foreground") or []
+    bg = strokes.get("background") or []
+    try:
+        brush_radius = int(body.get("brush_radius", 15))
+    except (TypeError, ValueError):
+        return json_response({"error": "brush_radius must be an integer"}, 400)
+
+    if not image_filename:
+        return json_response({"error": "image_filename is required"}, 400)
+    if not fg or not bg:
+        return json_response({"error": "foreground and background strokes are required"}, 400)
+
+    try:
+        img_bytes = _fetch_base_image(layer.flake_path, image_filename)
+    except Exception as e:
+        return json_response({"error": f"could not fetch base image: {e}"}, 502)
+
+    try:
+        mask_png = run_watershed(img_bytes, fg, bg, brush_radius=brush_radius)
+    except ValueError as e:
+        return json_response({"error": str(e)}, 400)
+    except Exception as e:
+        app.logger.exception("Watershed failed for layer %s/%s", layer_id, image_filename)
+        return json_response({"error": f"watershed failed: {e}"}, 500)
+
+    name = f"{uuid.uuid4().hex}.png"
+    dest = MASKS_DIR / name
+    dest.write_bytes(mask_png)
+    mask_url = f"/uploads/masks/{name}"
+
+    existing = (
+        db_session.query(LayerMask)
+        .filter_by(layer_id=layer_id, image_filename=image_filename)
+        .one_or_none()
+    )
+    if existing is not None:
+        old_path = _mask_url_to_path(existing.mask_url)
+        if old_path is not None and old_path != dest:
+            try:
+                old_path.unlink()
+            except OSError:
+                pass
+        existing.mask_url = mask_url
+        existing.created_at = time.time()
+        mask_row = existing
+    else:
+        mask_row = LayerMask(
+            layer_id=layer_id,
+            image_filename=image_filename,
+            mask_url=mask_url,
+            created_at=time.time(),
+        )
+        db_session.add(mask_row)
+    db_session.commit()
+
+    _invalidate_user_mask_caches(layer_id, image_filename)
+    return json_response(mask_row.to_dict(), 201)
+
+
+@app.route("/stacks/<int:stack_id>/layers/<int:layer_id>/masks", methods=["GET"])
+def list_layer_masks(stack_id, layer_id):
+    layer = db_session.get(StackLayer, layer_id)
+    if layer is None or layer.stack_id != stack_id:
+        return json_response({"error": "layer not found"}, 404)
+    return json_response({m.image_filename: m.mask_url for m in layer.masks})
+
+
+@app.route("/stacks/<int:stack_id>/layers/<int:layer_id>/masks/<path:image_filename>", methods=["DELETE"])
+def delete_layer_mask(stack_id, layer_id, image_filename):
+    layer = db_session.get(StackLayer, layer_id)
+    if layer is None or layer.stack_id != stack_id:
+        return json_response({"error": "layer not found"}, 404)
+    row = (
+        db_session.query(LayerMask)
+        .filter_by(layer_id=layer_id, image_filename=image_filename)
+        .one_or_none()
+    )
+    if row is None:
+        return json_response({"error": "mask not found"}, 404)
+    path = _mask_url_to_path(row.mask_url)
+    if path is not None:
+        try:
+            path.unlink()
+        except OSError as e:
+            app.logger.warning("Could not unlink mask %s: %s", path, e)
+    db_session.delete(row)
+    db_session.commit()
+    _invalidate_user_mask_caches(layer_id, image_filename)
+    return json_response({"deleted": image_filename})
 
 
 # ---------------------------------------------------------------------------
@@ -649,9 +989,25 @@ def delete_stack(stack_id):
     if stack is None:
         return json_response({"error": "not found"}, 404)
     user = stack.user  # capture before delete so the mirror can locate the folder
+
+    # Collect mask file paths + cache keys before the cascade deletes the rows.
+    mask_cleanup = []
+    for layer in stack.layers:
+        for mask in layer.masks:
+            mask_cleanup.append((layer.id, mask.image_filename, _mask_url_to_path(mask.mask_url)))
+
     db_session.delete(stack)
     db_session.commit()
     fs_mirror.delete_stack(FS_ROOT, stack_id, user)
+
+    for lid, ifile, path in mask_cleanup:
+        if path is not None:
+            try:
+                path.unlink()
+            except OSError as e:
+                app.logger.warning("Could not unlink mask %s: %s", path, e)
+        _invalidate_user_mask_caches(lid, ifile)
+
     return json_response({"deleted": stack_id})
 
 
@@ -754,6 +1110,7 @@ def add_layer(stack_id):
             brightness=body.get("brightness", 1.0),
             contrast=body.get("contrast", 1.0),
             image_filename=body.get("image_filename", "eval_img.jpg"),
+            canvas_base_filename=body.get("canvas_base_filename", "raw_img.png"),
         )
 
     db_session.add(layer)
@@ -778,6 +1135,8 @@ def update_layer(stack_id, layer_id):
         layer.layer_index = int(body["layer_index"])
     if "image_filename" in body:
         layer.image_filename = body["image_filename"]
+    if "canvas_base_filename" in body:
+        layer.canvas_base_filename = body["canvas_base_filename"] or "raw_img.png"
     if "name" in body:
         layer.name = body["name"] or None
     # Shape-specific updatable fields
@@ -800,6 +1159,17 @@ def delete_layer(stack_id, layer_id):
     layer = db_session.get(StackLayer, layer_id)
     if layer is None or layer.stack_id != stack_id:
         return json_response({"error": "not found"}, 404)
+
+    # Unlink mask files before the row cascade removes the LayerMask records.
+    for mask in list(layer.masks):
+        path = _mask_url_to_path(mask.mask_url)
+        if path is not None:
+            try:
+                path.unlink()
+            except OSError as e:
+                app.logger.warning("Could not unlink mask %s: %s", path, e)
+        _invalidate_user_mask_caches(layer_id, mask.image_filename)
+
     db_session.delete(layer)
     stack = db_session.get(Stack, stack_id)
     if stack:

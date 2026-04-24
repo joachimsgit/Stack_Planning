@@ -17,7 +17,7 @@ def create_db_engine(config: dict):
 
 
 def init_db(engine):
-    from database.models import User, Stack, StackLayer, FlakeNote  # noqa: F401 — registers models
+    from database.models import User, Stack, StackLayer, FlakeNote, LayerMask  # noqa: F401 — registers models
     Base.metadata.create_all(bind=engine)
 
 
@@ -39,8 +39,9 @@ def run_migrations(engine):
             ("shape_color",        "TEXT"),
             ("shape_stroke_width", "REAL DEFAULT 2.0"),
             ("name",               "TEXT"),
-            ("is_local",           "INTEGER NOT NULL DEFAULT 0"),
-            ("local_image_url",    "TEXT"),
+            ("is_local",             "INTEGER NOT NULL DEFAULT 0"),
+            ("local_image_url",      "TEXT"),
+            ("canvas_base_filename", "TEXT NOT NULL DEFAULT 'raw_img.png'"),
         ]
         for col_name, col_def in shape_migrations:
             if col_name not in layers_cols:
@@ -60,6 +61,24 @@ def run_migrations(engine):
         ))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_stack_layers_flake_id ON stack_layers (flake_id)"
+        ))
+
+        conn.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS layer_masks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                layer_id INTEGER NOT NULL REFERENCES stack_layers(id) ON DELETE CASCADE,
+                image_filename VARCHAR(64) NOT NULL,
+                mask_url VARCHAR(512) NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_layer_masks_layer_id ON layer_masks (layer_id)"
+        ))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_layer_mask_file ON layer_masks (layer_id, image_filename)"
         ))
         conn.commit()
 

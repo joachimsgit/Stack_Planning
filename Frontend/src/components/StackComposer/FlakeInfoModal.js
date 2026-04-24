@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { Modal, Text, Badge, Grid, Loader, Group, Button, SimpleGrid, Textarea, TextInput, ActionIcon } from "@mantine/core";
-import { IconStar, IconAlertTriangle, IconPencil, IconCheck, IconX } from "@tabler/icons-react";
+import { Modal, Text, Badge, Loader, Group, Button, SimpleGrid, Textarea, TextInput, ActionIcon } from "@mantine/core";
+import { IconPencil, IconCheck, IconX, IconBrush } from "@tabler/icons-react";
 import { fetchFlakes, flakeImageUrl, fetchFlakeNotes, saveFlakeNotes } from "../../utils/api";
+import WatershedEditor from "./WatershedEditor";
 
 const MATERIAL_COLORS = {
   Graphene: "gray", hBN: "yellow", WSe2: "green",
@@ -28,7 +29,7 @@ function InfoRow({ label, value }) {
   );
 }
 
-function FlakeInfoModal({ layer, opened, onClose }) {
+function FlakeInfoModal({ layer, opened, onClose, stackId, onMasksChanged }) {
   const [flake, setFlake] = useState(null);
   const [loading, setLoading] = useState(false);
   const [magIndex, setMagIndex] = useState(0);
@@ -41,6 +42,7 @@ function FlakeInfoModal({ layer, opened, onClose }) {
   const [editingUser, setEditingUser] = useState(false);
   const [userInput, setUserInput] = useState("");
   const [userSaving, setUserSaving] = useState(false);
+  const [watershedOpen, setWatershedOpen] = useState(false);
 
   useEffect(() => {
     if (!opened || !layer) return;
@@ -99,6 +101,8 @@ function FlakeInfoModal({ layer, opened, onClose }) {
 
   const currentMag = MAGNIFICATIONS[magIndex];
   const imgUrl = flakeImageUrl(layer.flake_path, currentMag.file);
+  const canPaintMask = Boolean(stackId) && currentMag.file !== "overview_marked.jpg";
+  const hasMaskForMag = Boolean(layer.masks && layer.masks[currentMag.file]);
 
   return (
     <Modal
@@ -117,18 +121,36 @@ function FlakeInfoModal({ layer, opened, onClose }) {
 
         {/* ── Image panel ── */}
         <div style={{ flex: "0 0 640px" }}>
-          <Group spacing={4} mb="xs">
-            {MAGNIFICATIONS.map((m, i) => (
-              <Button
-                key={m.file}
-                size="xs"
-                compact
-                variant={i === magIndex ? "filled" : "default"}
-                onClick={() => setMagIndex(i)}
-              >
-                {m.label}
-              </Button>
-            ))}
+          <Group spacing={4} mb="xs" position="apart" noWrap>
+            <Group spacing={4} noWrap>
+              {MAGNIFICATIONS.map((m, i) => {
+                const hasMask = Boolean(layer.masks && layer.masks[m.file]);
+                return (
+                  <Button
+                    key={m.file}
+                    size="xs"
+                    compact
+                    variant={i === magIndex ? "filled" : "default"}
+                    onClick={() => setMagIndex(i)}
+                    title={hasMask ? "User mask available" : undefined}
+                  >
+                    {m.label}{hasMask ? " •" : ""}
+                  </Button>
+                );
+              })}
+            </Group>
+            <Button
+              size="xs"
+              compact
+              leftIcon={<IconBrush size={12} />}
+              variant={hasMaskForMag ? "filled" : "light"}
+              color="grape"
+              onClick={() => setWatershedOpen(true)}
+              disabled={!canPaintMask}
+              title={canPaintMask ? "Paint foreground/background scribbles to build a watershed mask" : "Mask painting not available for this image"}
+            >
+              {hasMaskForMag ? "Edit mask" : "Generate mask"}
+            </Button>
           </Group>
 
           <div style={{ position: "relative", background: "#111", borderRadius: 6, overflow: "hidden", minHeight: 200 }}>
@@ -242,6 +264,19 @@ function FlakeInfoModal({ layer, opened, onClose }) {
         </Group>
       </div>
 
+      <WatershedEditor
+        opened={watershedOpen}
+        onClose={() => {
+          setWatershedOpen(false);
+          if (onMasksChanged && layer) onMasksChanged(layer.id);
+        }}
+        stackId={stackId}
+        layer={layer}
+        imageFilename={currentMag.file}
+        onSaved={() => {
+          if (onMasksChanged && layer) onMasksChanged(layer.id);
+        }}
+      />
     </Modal>
   );
 }

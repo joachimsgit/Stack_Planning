@@ -46,31 +46,80 @@ export async function uploadImage(file) {
   return res.json();
 }
 
-export function flakeCropUrl(flakePath) {
-  if (!flakePath) return null;
-  return `${BASE}/proxy/crop?flake_path=${encodeURIComponent(flakePath)}`;
+// `layerId` + `imageFilename` are optional; when both are present and the layer
+// has a user-painted mask for that base image, the backend swaps in the user
+// mask and the appropriate base image automatically.
+function _withUserMaskParams(qs, { layerId, imageFilename } = {}) {
+  if (layerId != null && imageFilename) {
+    qs.set("layer_id", String(layerId));
+    qs.set("image_filename", imageFilename);
+  }
+  return qs;
 }
 
-export function flakeMaskedUrl(flakePath) {
+export function flakeCropUrl(flakePath, opts) {
   if (!flakePath) return null;
-  return `${BASE}/proxy/masked?flake_path=${encodeURIComponent(flakePath)}`;
+  const qs = new URLSearchParams({ flake_path: flakePath });
+  _withUserMaskParams(qs, opts);
+  return `${BASE}/proxy/crop?${qs.toString()}`;
 }
 
-export function flakeOutlineUrl(flakePath, color) {
+export function flakeMaskedUrl(flakePath, opts) {
+  if (!flakePath) return null;
+  const qs = new URLSearchParams({ flake_path: flakePath });
+  _withUserMaskParams(qs, opts);
+  return `${BASE}/proxy/masked?${qs.toString()}`;
+}
+
+export function flakeOutlineUrl(flakePath, color, opts) {
   if (!flakePath) return null;
   const qs = new URLSearchParams({ flake_path: flakePath });
   if (color) qs.set("color", color.replace(/^#/, ""));
+  _withUserMaskParams(qs, opts);
   return `${BASE}/proxy/outline?${qs.toString()}`;
 }
 
-export async function fetchFlakeCentroid(flakePath, signal) {
+export async function fetchFlakeCentroid(flakePath, optsOrSignal, maybeSignal) {
   if (!flakePath) return { cx_pct: 50, cy_pct: 50 };
+  // Backwards-compat: older callers pass (flakePath, signal). Newer callers pass
+  // (flakePath, {layerId, imageFilename}, signal).
+  let opts, signal;
+  if (optsOrSignal && typeof optsOrSignal === "object" && !(optsOrSignal instanceof AbortSignal)) {
+    opts = optsOrSignal;
+    signal = maybeSignal;
+  } else {
+    signal = optsOrSignal;
+  }
+  const qs = new URLSearchParams({ flake_path: flakePath });
+  _withUserMaskParams(qs, opts);
   try {
-    const r = await fetch(`${BASE}/proxy/centroid?flake_path=${encodeURIComponent(flakePath)}`, { signal });
+    const r = await fetch(`${BASE}/proxy/centroid?${qs.toString()}`, { signal });
     return await r.json();
   } catch {
     return { cx_pct: 50, cy_pct: 50 };
   }
+}
+
+// ---------------------------------------------------------------------------
+// User-painted watershed masks (per layer, per base image)
+// ---------------------------------------------------------------------------
+
+export function createWatershedMask(stackId, layerId, body) {
+  return apiFetch(`/stacks/${stackId}/layers/${layerId}/watershed`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchLayerMasks(stackId, layerId) {
+  return apiFetch(`/stacks/${stackId}/layers/${layerId}/masks`);
+}
+
+export function deleteLayerMask(stackId, layerId, imageFilename) {
+  return apiFetch(
+    `/stacks/${stackId}/layers/${layerId}/masks/${encodeURIComponent(imageFilename)}`,
+    { method: "DELETE" }
+  );
 }
 
 // ---------------------------------------------------------------------------
