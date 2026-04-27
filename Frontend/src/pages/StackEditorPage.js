@@ -113,6 +113,10 @@ function StackEditorPage() {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
 
+  // Inline stack user editing
+  const [editingUser, setEditingUser] = useState(false);
+  const [userInput, setUserInput] = useState("");
+
   // Local image import
   const fileInputRef = useRef(null);
 
@@ -172,7 +176,7 @@ function StackEditorPage() {
   useEffect(() => {
     fetchStack(id)
       .then((data) => {
-        setStack({ id: data.id, name: data.name, notes: data.notes });
+        setStack({ id: data.id, name: data.name, notes: data.notes, username: data.username });
         setLayers(data.layers || []);
         setNameInput(data.name);
         if (data.layers && data.layers.length > 0) {
@@ -323,6 +327,16 @@ function StackEditorPage() {
     }
   };
 
+  const saveStackUser = async () => {
+    try {
+      const updated = await updateStack(id, { username: userInput.trim() });
+      setStack((prev) => ({ ...prev, username: updated.username }));
+      setEditingUser(false);
+    } catch {
+      notifications.show({ color: "red", message: "Failed to update stack user" });
+    }
+  };
+
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
@@ -356,6 +370,30 @@ function StackEditorPage() {
         <Group spacing={4}>
           <Text weight={600} size="sm">{stack?.name}</Text>
           <ActionIcon size="sm" variant="subtle" onClick={() => { setNameInput(stack?.name || ""); setEditingName(true); }}>
+            <IconPencil size={14} />
+          </ActionIcon>
+        </Group>
+      )}
+      {editingUser ? (
+        <Group spacing={4}>
+          <TextInput
+            value={userInput}
+            onChange={(e) => setUserInput(e.currentTarget.value)}
+            placeholder="user name"
+            size="xs"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveStackUser();
+              if (e.key === "Escape") setEditingUser(false);
+            }}
+          />
+          <ActionIcon size="sm" color="green" onClick={saveStackUser}><IconCheck size={14} /></ActionIcon>
+          <ActionIcon size="sm" color="red" onClick={() => setEditingUser(false)}><IconX size={14} /></ActionIcon>
+        </Group>
+      ) : (
+        <Group spacing={4}>
+          <Text size="sm" color="dimmed">{stack?.username || "no user"}</Text>
+          <ActionIcon size="sm" variant="subtle" onClick={() => { setUserInput(stack?.username || ""); setEditingUser(true); }}>
             <IconPencil size={14} />
           </ActionIcon>
         </Group>

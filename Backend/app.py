@@ -977,6 +977,17 @@ def update_stack(stack_id):
         stack.name = body["name"].strip()
     if "notes" in body:
         stack.notes = body["notes"]
+    if "username" in body:
+        uname = (body["username"] or "").strip()
+        if uname:
+            user = db_session.query(User).filter(User.name == uname).first()
+            if user is None:
+                user = User(name=uname, created_at=time.time())
+                db_session.add(user)
+                db_session.flush()
+            stack.user_id = user.id
+        else:
+            stack.user_id = None
     stack.updated_at = time.time()
     db_session.commit()
     fs_mirror.sync_stack(FS_ROOT, stack, scans_root=_scans_root_if_present(), copy_images=False)
