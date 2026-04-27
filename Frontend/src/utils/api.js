@@ -122,6 +122,16 @@ export function deleteLayerMask(stackId, layerId, imageFilename) {
   );
 }
 
+/** Returns {filename: bool} for each high-mag image — whether it exists on the GMM server. */
+export function fetchAvailableImages(flakePath) {
+  return apiFetch(`/proxy/available-images?flake_path=${encodeURIComponent(flakePath)}`);
+}
+
+/** Auto-generate watershed masks for all available high-mag images of a layer. */
+export function autoWatershedMasks(stackId, layerId) {
+  return apiFetch(`/stacks/${stackId}/layers/${layerId}/auto-watershed`, { method: "POST" });
+}
+
 // ---------------------------------------------------------------------------
 // Stack CRUD
 // ---------------------------------------------------------------------------
