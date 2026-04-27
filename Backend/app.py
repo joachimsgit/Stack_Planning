@@ -915,74 +915,60 @@ def delete_layer_mask(stack_id, layer_id, image_filename):
     return json_response({"deleted": image_filename})
 
 
-@app.route("/stacks/<int:stack_id>/layers/<int:layer_id>/auto-watershed", methods=["POST"])
-def auto_watershed_masks(stack_id, layer_id):
-    """Auto-generate watershed masks for all available high-mag images of a layer.
-
-    For each image that exists on the GMM server the flake marker is placed at
-    the image center (GMM scans always center the flake) and the background
-    marker is derived from the histogram mode color.  Results are persisted
-    exactly like manually-painted masks.
-
-    Returns a mapping of filename → {"status": "ok"|"skipped"|"error", ...}.
-    """
-    from services.watershed import auto_watershed
-
-    layer = db_session.get(StackLayer, layer_id)
-    if layer is None or layer.stack_id != stack_id:
-        return json_response({"error": "layer not found"}, 404)
-    if not layer.flake_path:
-        return json_response({"error": "layer has no flake_path"}, 400)
-
-    HIGH_MAG_FILES = ["2.5x.png", "5x.png", "20x.png", "50x.png", "100x.png"]
-    results = {}
-
-    for filename in HIGH_MAG_FILES:
-        try:
-            img_bytes = _fetch_base_image(layer.flake_path, filename)
-        except Exception:
-            results[filename] = {"status": "skipped"}
-            continue
-
-        try:
-            mask_png = auto_watershed(img_bytes)
-        except Exception as e:
-            app.logger.exception("Auto-watershed failed for layer %s / %s", layer_id, filename)
-            results[filename] = {"status": "error", "reason": str(e)}
-            continue
-
-        name = f"{uuid.uuid4().hex}.png"
-        dest = MASKS_DIR / name
-        dest.write_bytes(mask_png)
-        mask_url = f"/uploads/masks/{name}"
-
-        existing = (
-            db_session.query(LayerMask)
-            .filter_by(layer_id=layer_id, image_filename=filename)
-            .one_or_none()
-        )
-        if existing is not None:
-            old_path = _mask_url_to_path(existing.mask_url)
-            if old_path is not None and old_path != dest:
-                try:
-                    old_path.unlink()
-                except OSError:
-                    pass
-            existing.mask_url = mask_url
-            existing.created_at = time.time()
-        else:
-            db_session.add(LayerMask(
-                layer_id=layer_id,
-                image_filename=filename,
-                mask_url=mask_url,
-                created_at=time.time(),
-            ))
-
-        db_session.commit()
-        _invalidate_user_mask_caches(layer_id, filename)
-        results[filename] = {"status": "ok", "mask_url": mask_url}
-
-    return json_response(results)
+# ---------------------------------------------------------------------------
+# Auto-watershed endpoint (disabled — marker heuristic needs refinement)
+# ---------------------------------------------------------------------------
+# @app.route("/stacks/<int:stack_id>/layers/<int:layer_id>/auto-watershed", methods=["POST"])
+# def auto_watershed_masks(stack_id, layer_id):
+#     from services.watershed import auto_watershed
+#     layer = db_session.get(StackLayer, layer_id)
+#     if layer is None or layer.stack_id != stack_id:
+#         return json_response({"error": "layer not found"}, 404)
+#     if not layer.flake_path:
+#         return json_response({"error": "layer has no flake_path"}, 400)
+#     HIGH_MAG_FILES = ["2.5x.png", "5x.png", "20x.png", "50x.png", "100x.png"]
+#     results = {}
+#     for filename in HIGH_MAG_FILES:
+#         try:
+#             img_bytes = _fetch_base_image(layer.flake_path, filename)
+#         except Exception:
+#             results[filename] = {"status": "skipped"}
+#             continue
+#         try:
+#             mask_png = auto_watershed(img_bytes)
+#         except Exception as e:
+#             app.logger.exception("Auto-watershed failed for layer %s / %s", layer_id, filename)
+#             results[filename] = {"status": "error", "reason": str(e)}
+#             continue
+#         name = f"{uuid.uuid4().hex}.png"
+#         dest = MASKS_DIR / name
+#         dest.write_bytes(mask_png)
+#         mask_url = f"/uploads/masks/{name}"
+#         existing = (
+#             db_session.query(LayerMask)
+#             .filter_by(layer_id=layer_id, image_filename=filename)
+#             .one_or_none()
+#         )
+#         if existing is not None:
+#             old_path = _mask_url_to_path(existing.mask_url)
+#             if old_path is not None and old_path != dest:
+#                 try:
+#                     old_path.unlink()
+#                 except OSError:
+#                     pass
+#             existing.mask_url = mask_url
+#             existing.created_at = time.time()
+#         else:
+#             db_session.add(LayerMask(
+#                 layer_id=layer_id,
+#                 image_filename=filename,
+#                 mask_url=mask_url,
+#                 created_at=time.time(),
+#             ))
+#         db_session.commit()
+#         _invalidate_user_mask_caches(layer_id, filename)
+#         results[filename] = {"status": "ok", "mask_url": mask_url}
+#     return json_response(results)
 
 
 # ---------------------------------------------------------------------------

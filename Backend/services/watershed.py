@@ -77,65 +77,68 @@ def run_watershed(image_bytes, foreground_strokes, background_strokes, brush_rad
     return out.getvalue()
 
 
-def auto_watershed(image_bytes, brush_radius=25):
-    """Auto-generate a watershed mask using heuristic marker placement.
-
-    Foreground (flake): center of image — GMM scans always place the flake there.
-    Background: border pixel nearest to the histogram mode color (most common
-    color = substrate background that dominates most of the image area).
-    """
-    brush_radius = max(1, int(brush_radius))
-
-    pil = Image.open(BytesIO(image_bytes)).convert("RGB")
-    rgb = np.array(pil)
-    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-    h, w = bgr.shape[:2]
-
-    cx, cy = w // 2, h // 2
-
-    # Quantise colours (32 bins per channel) then find the mode.
-    q = 8
-    packed = (
-        (rgb[:, :, 0].astype(np.int32) // q) * (32 * 32)
-        + (rgb[:, :, 1].astype(np.int32) // q) * 32
-        + (rgb[:, :, 2].astype(np.int32) // q)
-    ).ravel()
-    mode_packed = int(np.bincount(packed).argmax())
-    mode_color = np.array(
-        [(mode_packed // (32 * 32)) * q, ((mode_packed // 32) % 32) * q, (mode_packed % 32) * q],
-        dtype=np.int32,
-    )
-
-    # Search for the background pixel in the outermost 10% border band.
-    margin = max(1, min(h, w) // 10)
-    border_mask = np.ones((h, w), dtype=bool)
-    border_mask[margin : h - margin, margin : w - margin] = False
-    by_coords, bx_coords = np.where(border_mask)
-    border_pixels = rgb[by_coords, bx_coords].astype(np.int32)
-    dists = np.sum((border_pixels - mode_color) ** 2, axis=1)
-    best = int(np.argmin(dists))
-    bg_x, bg_y = int(bx_coords[best]), int(by_coords[best])
-
-    markers = np.zeros((h, w), dtype=np.int32)
-    cv2.circle(markers, (bg_x, bg_y), brush_radius, 1, thickness=-1)
-    cv2.circle(markers, (cx, cy), brush_radius, 2, thickness=-1)
-
-    if not np.any(markers == 2) or not np.any(markers == 1):
-        raise ValueError("Auto marker placement failed — image too small.")
-
-    cv2.watershed(bgr, markers)
-
-    flake = (markers == 2).astype(np.uint8)
-
-    num, labels, stats, _ = cv2.connectedComponentsWithStats(flake, connectivity=8)
-    if num > 1:
-        largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-        flake = (labels == largest).astype(np.uint8)
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    flake = cv2.morphologyEx(flake, cv2.MORPH_CLOSE, kernel)
-
-    mask_img = Image.fromarray((flake * 255).astype(np.uint8), mode="L")
-    out = BytesIO()
-    mask_img.save(out, format="PNG")
-    return out.getvalue()
+# ---------------------------------------------------------------------------
+# Auto-watershed (disabled — marker heuristic needs refinement)
+# ---------------------------------------------------------------------------
+# def auto_watershed(image_bytes, brush_radius=25):
+#     """Auto-generate a watershed mask using heuristic marker placement.
+#
+#     Foreground (flake): center of image — GMM scans always place the flake there.
+#     Background: border pixel nearest to the histogram mode color (most common
+#     color = substrate background that dominates most of the image area).
+#     """
+#     brush_radius = max(1, int(brush_radius))
+#
+#     pil = Image.open(BytesIO(image_bytes)).convert("RGB")
+#     rgb = np.array(pil)
+#     bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+#     h, w = bgr.shape[:2]
+#
+#     cx, cy = w // 2, h // 2
+#
+#     # Quantise colours (32 bins per channel) then find the mode.
+#     q = 8
+#     packed = (
+#         (rgb[:, :, 0].astype(np.int32) // q) * (32 * 32)
+#         + (rgb[:, :, 1].astype(np.int32) // q) * 32
+#         + (rgb[:, :, 2].astype(np.int32) // q)
+#     ).ravel()
+#     mode_packed = int(np.bincount(packed).argmax())
+#     mode_color = np.array(
+#         [(mode_packed // (32 * 32)) * q, ((mode_packed // 32) % 32) * q, (mode_packed % 32) * q],
+#         dtype=np.int32,
+#     )
+#
+#     # Search for the background pixel in the outermost 10% border band.
+#     margin = max(1, min(h, w) // 10)
+#     border_mask = np.ones((h, w), dtype=bool)
+#     border_mask[margin : h - margin, margin : w - margin] = False
+#     by_coords, bx_coords = np.where(border_mask)
+#     border_pixels = rgb[by_coords, bx_coords].astype(np.int32)
+#     dists = np.sum((border_pixels - mode_color) ** 2, axis=1)
+#     best = int(np.argmin(dists))
+#     bg_x, bg_y = int(bx_coords[best]), int(by_coords[best])
+#
+#     markers = np.zeros((h, w), dtype=np.int32)
+#     cv2.circle(markers, (bg_x, bg_y), brush_radius, 1, thickness=-1)
+#     cv2.circle(markers, (cx, cy), brush_radius, 2, thickness=-1)
+#
+#     if not np.any(markers == 2) or not np.any(markers == 1):
+#         raise ValueError("Auto marker placement failed — image too small.")
+#
+#     cv2.watershed(bgr, markers)
+#
+#     flake = (markers == 2).astype(np.uint8)
+#
+#     num, labels, stats, _ = cv2.connectedComponentsWithStats(flake, connectivity=8)
+#     if num > 1:
+#         largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+#         flake = (labels == largest).astype(np.uint8)
+#
+#     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+#     flake = cv2.morphologyEx(flake, cv2.MORPH_CLOSE, kernel)
+#
+#     mask_img = Image.fromarray((flake * 255).astype(np.uint8), mode="L")
+#     out = BytesIO()
+#     mask_img.save(out, format="PNG")
+#     return out.getvalue()

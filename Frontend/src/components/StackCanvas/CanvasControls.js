@@ -1,9 +1,11 @@
+import { useState, useEffect } from "react";
 import { Slider, Button, Text, Group, Stack, Divider, NumberInput } from "@mantine/core";
 import {
   BASE_IMAGE_ORDER,
   MAGNIFICATION_CALIBRATION,
   baseSupportsRemoteOverlay,
 } from "../../utils/calibration";
+import { fetchAvailableImages } from "../../utils/api";
 
 const normalizeRotation = (r) => {
   const mod = ((Number(r) || 0) % 360 + 360) % 360;
@@ -17,6 +19,19 @@ const DISPLAY_BUTTONS = [
 ];
 
 function CanvasControls({ layer, displayModes, onToggleMode, onSetDisplayColor, onUpdateTransform }) {
+  const [imageExists, setImageExists] = useState(null);
+
+  useEffect(() => {
+    if (!layer?.flake_path || layer.is_shape || layer.is_local) {
+      setImageExists(null);
+      return;
+    }
+    setImageExists(null);
+    fetchAvailableImages(layer.flake_path)
+      .then((data) => setImageExists(data))
+      .catch(() => setImageExists({}));
+  }, [layer?.flake_path, layer?.id]);
+
   return (
     <Stack spacing="xs" style={{ padding: "0 0.25rem" }}>
       {!layer ? (
@@ -65,6 +80,8 @@ function CanvasControls({ layer, displayModes, onToggleMode, onSetDisplayColor, 
                       if (!cal) return null;
                       const active = (layer.canvas_base_filename || "raw_img.png") === file;
                       const hasMask = Boolean(layer.masks && layer.masks[file]);
+                      // raw_img.png and eval_img.jpg are always available (not probed)
+                      const imgAvail = imageExists === null || imageExists[file] !== false;
                       return (
                         <Button
                           key={file}
@@ -72,7 +89,8 @@ function CanvasControls({ layer, displayModes, onToggleMode, onSetDisplayColor, 
                           compact
                           variant={active ? "filled" : "default"}
                           onClick={() => onUpdateTransform({ canvas_base_filename: file })}
-                          title={hasMask ? "User mask available" : undefined}
+                          style={!imgAvail ? { opacity: 0.45, textDecoration: "line-through" } : undefined}
+                          title={!imgAvail ? "Image not available" : hasMask ? "User mask available" : undefined}
                         >
                           {cal.label}{hasMask ? " •" : ""}
                         </Button>

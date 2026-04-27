@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Modal, Text, Badge, Loader, Group, Button, SimpleGrid, Textarea } from "@mantine/core";
-import { IconBrush, IconX, IconSparkles } from "@tabler/icons-react";
-import { fetchFlakes, flakeImageUrl, fetchFlakeNotes, saveFlakeNotes, fetchAvailableImages, autoWatershedMasks } from "../../utils/api";
+import { IconBrush, IconX } from "@tabler/icons-react";
+import { fetchFlakes, flakeImageUrl, fetchFlakeNotes, saveFlakeNotes, fetchAvailableImages } from "../../utils/api";
 import WatershedEditor from "./WatershedEditor";
 
 const MATERIAL_COLORS = {
@@ -41,7 +41,7 @@ function FlakeInfoModal({ layer, opened, onClose, stackId, onMasksChanged }) {
   const [watershedOpen, setWatershedOpen] = useState(false);
   // imageExists: null = not yet fetched, {} = results { "20x.png": true/false, ... }
   const [imageExists, setImageExists] = useState(null);
-  const [autoRunning, setAutoRunning] = useState(false);
+  // const [autoRunning, setAutoRunning] = useState(false); // reserved for auto-watershed
 
   useEffect(() => {
     if (!opened || !layer) return;
@@ -78,14 +78,15 @@ function FlakeInfoModal({ layer, opened, onClose, stackId, onMasksChanged }) {
       .finally(() => setNotesSaving(false));
   }
 
-  function handleAutoWatershed() {
-    if (!stackId || !layer) return;
-    setAutoRunning(true);
-    autoWatershedMasks(stackId, layer.id)
-      .then(() => { if (onMasksChanged) onMasksChanged(layer.id); })
-      .catch(() => {})
-      .finally(() => setAutoRunning(false));
-  }
+  // Auto-watershed disabled — marker heuristic needs refinement.
+  // function handleAutoWatershed() {
+  //   if (!stackId || !layer) return;
+  //   setAutoRunning(true);
+  //   autoWatershedMasks(stackId, layer.id)
+  //     .then(() => { if (onMasksChanged) onMasksChanged(layer.id); })
+  //     .catch(() => {})
+  //     .finally(() => setAutoRunning(false));
+  // }
 
   if (!layer) return null;
 
@@ -169,6 +170,7 @@ function FlakeInfoModal({ layer, opened, onClose, stackId, onMasksChanged }) {
                   </Button>
                 )
               )}
+              {/* Auto masks button disabled — marker heuristic needs refinement.
               {Boolean(stackId) && (
                 <Button
                   size="xs"
@@ -183,6 +185,7 @@ function FlakeInfoModal({ layer, opened, onClose, stackId, onMasksChanged }) {
                   Auto masks
                 </Button>
               )}
+              */}
             </Group>
           </Group>
 
