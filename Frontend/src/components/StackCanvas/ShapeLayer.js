@@ -65,19 +65,43 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
 
     const rect = svgEl.getBoundingClientRect();
     const scale = rect.width / CANVAS_SIZE;
-    const screenCX = rect.left + cx * scale;
-    const screenCY = rect.top + cy * scale;
+    const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
+
+    // For group rotation use the centroid of all selected layers as the shared
+    // pivot. Canvas point (CANVAS_SIZE/2 + pos_x, CANVAS_SIZE/2 + pos_y) maps
+    // to screen via: screen = rect.left/top + canvas_coord * scale.
+    let screenCX, screenCY, groupCx, groupCy;
+    if (groupSnap && onUpdateManyLayers) {
+      groupCx = groupSnap.reduce((acc, l) => acc + l.pos_x, 0) / groupSnap.length;
+      groupCy = groupSnap.reduce((acc, l) => acc + l.pos_y, 0) / groupSnap.length;
+      screenCX = rect.left + (CANVAS_SIZE / 2 + groupCx) * scale;
+      screenCY = rect.top  + (CANVAS_SIZE / 2 + groupCy) * scale;
+    } else {
+      screenCX = rect.left + cx * scale;
+      screenCY = rect.top  + cy * scale;
+    }
 
     const startAngle = Math.atan2(e.clientY - screenCY, e.clientX - screenCX);
     const startRotation = layer.rotation || 0;
-    const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
 
     const onMove = (me) => {
       const angle = Math.atan2(me.clientY - screenCY, me.clientX - screenCX);
       const delta = (angle - startAngle) * 180 / Math.PI;
       if (groupSnap && onUpdateManyLayers) {
+        const theta = delta * Math.PI / 180;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
         onUpdateManyLayers(
-          groupSnap.map((s) => ({ id: s.id, rotation: s.rotation + delta }))
+          groupSnap.map((s) => {
+            const sdx = s.pos_x - groupCx;
+            const sdy = s.pos_y - groupCy;
+            return {
+              id: s.id,
+              pos_x: groupCx + sdx * cos - sdy * sin,
+              pos_y: groupCy + sdx * sin + sdy * cos,
+              rotation: s.rotation + delta,
+            };
+          })
         );
       } else {
         onUpdateTransform({ rotation: startRotation + delta });

@@ -130,19 +130,43 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       // The zero-size pivot element sits exactly at the transform origin,
       // so its screen-space position is the rotation center regardless of current rotation.
       const pivotRect = pivotRef.current.getBoundingClientRect();
-      const pivotX = pivotRect.x;
-      const pivotY = pivotRect.y;
+      const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
+
+      // For group rotation use the centroid of all selected layers as the shared
+      // pivot. Convert from canvas space to screen space via the active layer's
+      // known screen pivot: screen_offset = canvas_offset * zoom.
+      let pivotX, pivotY, groupCx, groupCy;
+      if (groupSnap && onUpdateManyLayers) {
+        groupCx = groupSnap.reduce((acc, l) => acc + l.pos_x, 0) / groupSnap.length;
+        groupCy = groupSnap.reduce((acc, l) => acc + l.pos_y, 0) / groupSnap.length;
+        pivotX = pivotRect.x + (groupCx - (layer.pos_x || 0)) * (zoom ?? 1);
+        pivotY = pivotRect.y + (groupCy - (layer.pos_y || 0)) * (zoom ?? 1);
+      } else {
+        pivotX = pivotRect.x;
+        pivotY = pivotRect.y;
+      }
 
       const startAngle = Math.atan2(e.clientY - pivotY, e.clientX - pivotX);
       const startRotation = layer.rotation || 0;
-      const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
 
       const onMove = (me) => {
         const angle = Math.atan2(me.clientY - pivotY, me.clientX - pivotX);
         const delta = (angle - startAngle) * 180 / Math.PI;
         if (groupSnap && onUpdateManyLayers) {
+          const theta = delta * Math.PI / 180;
+          const cos = Math.cos(theta);
+          const sin = Math.sin(theta);
           onUpdateManyLayers(
-            groupSnap.map((s) => ({ id: s.id, rotation: s.rotation + delta }))
+            groupSnap.map((s) => {
+              const dx = s.pos_x - groupCx;
+              const dy = s.pos_y - groupCy;
+              return {
+                id: s.id,
+                pos_x: groupCx + dx * cos - dy * sin,
+                pos_y: groupCy + dx * sin + dy * cos,
+                rotation: s.rotation + delta,
+              };
+            })
           );
         } else {
           onUpdateTransform({ rotation: startRotation + delta });
@@ -157,7 +181,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
     },
-    [layer.rotation, onUpdateTransform, inGroup, getGroupSnapshot, onUpdateManyLayers]
+    [layer.rotation, layer.pos_x, layer.pos_y, zoom, onUpdateTransform, inGroup, getGroupSnapshot, onUpdateManyLayers]
   );
 
   const rotateHandle = isActive && (

@@ -105,10 +105,24 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
         if (!layer) return;
         const gIds = groupIdsRef.current;
         if (gIds.size > 1 && gIds.has(layer.id)) {
+          const group = sortedRef.current.filter((l) => gIds.has(l.id));
+          const cx = group.reduce((acc, l) => acc + (l.pos_x || 0), 0) / group.length;
+          const cy = group.reduce((acc, l) => acc + (l.pos_y || 0), 0) / group.length;
+          const delta = dir * ROTATION_STEP;
+          const theta = delta * Math.PI / 180;
+          const cos = Math.cos(theta);
+          const sin = Math.sin(theta);
           onUpdateManyLayers(
-            sortedRef.current
-              .filter((l) => gIds.has(l.id))
-              .map((l) => ({ id: l.id, rotation: (l.rotation || 0) + dir * ROTATION_STEP }))
+            group.map((l) => {
+              const dx = (l.pos_x || 0) - cx;
+              const dy = (l.pos_y || 0) - cy;
+              return {
+                id: l.id,
+                pos_x: cx + dx * cos - dy * sin,
+                pos_y: cy + dx * sin + dy * cos,
+                rotation: (l.rotation || 0) + delta,
+              };
+            })
           );
         } else {
           onUpdateLayer(layer.id, { rotation: (layer.rotation || 0) + dir * ROTATION_STEP });
@@ -381,10 +395,23 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
       let delta = Number(data.rotation) - curRot;
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
+      const group = sorted.filter((l) => groupIds.has(l.id));
+      const cx = group.reduce((acc, l) => acc + (l.pos_x || 0), 0) / group.length;
+      const cy = group.reduce((acc, l) => acc + (l.pos_y || 0), 0) / group.length;
+      const theta = delta * Math.PI / 180;
+      const cos = Math.cos(theta);
+      const sin = Math.sin(theta);
       onUpdateManyLayers(
-        sorted
-          .filter((l) => groupIds.has(l.id))
-          .map((l) => ({ id: l.id, rotation: (l.rotation || 0) + delta }))
+        group.map((l) => {
+          const dx = (l.pos_x || 0) - cx;
+          const dy = (l.pos_y || 0) - cy;
+          return {
+            id: l.id,
+            pos_x: cx + dx * cos - dy * sin,
+            pos_y: cy + dx * sin + dy * cos,
+            rotation: (l.rotation || 0) + delta,
+          };
+        })
       );
       return;
     }
