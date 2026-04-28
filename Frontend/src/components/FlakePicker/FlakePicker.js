@@ -80,6 +80,14 @@ function FlakePicker({ onSelectFlake }) {
       </div>
 
       {/* Results grid */}
+      {hasSearched && !loading && allFlakes.length > 0 && (
+        <Text size="xs" color="dimmed" className="flakePickerCount">
+          Showing {shown.length} of {filtered.length}
+          {hideUsed && allFlakes.length !== filtered.length
+            ? ` (${allFlakes.length - filtered.length} used hidden)`
+            : ""}
+        </Text>
+      )}
       <div className="flakePickerGrid">
         {loading ? (
           <div className="flakePickerEmpty">
@@ -98,12 +106,6 @@ function FlakePicker({ onSelectFlake }) {
           </div>
         ) : (
           <>
-            <Text size="xs" color="dimmed" px="xs" pt="xs" className="flakePickerGridHeader">
-              Showing {shown.length} of {filtered.length}
-              {hideUsed && allFlakes.length !== filtered.length
-                ? ` (${allFlakes.length - filtered.length} used hidden)`
-                : ""}
-            </Text>
             {shown.map((flake) => (
               <FlakeCard
                 key={flake.flake_id}

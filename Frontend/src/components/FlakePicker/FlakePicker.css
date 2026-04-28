@@ -26,13 +26,14 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 0.5rem;
-  row-gap: 235px;
+  row-gap: 280px;
   align-content: start;
   align-items: start;
 }
 
-.flakePickerGridHeader {
-  grid-column: 1 / -1;
+.flakePickerCount {
+  padding: 0.25rem 0.75rem;
+  flex-shrink: 0;
 }
 
 .flakePickerEmpty {
