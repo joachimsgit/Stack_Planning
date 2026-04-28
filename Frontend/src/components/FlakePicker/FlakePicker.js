@@ -1,6 +1,6 @@
 import "./FlakePicker.css";
 import { useState, useRef, useEffect } from "react";
-import { Button, Text, Loader, SegmentedControl, Checkbox } from "@mantine/core";
+import { Button, Text, Loader, Checkbox } from "@mantine/core";
 import { IconSearch, IconLayersIntersect } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import FlakePickerFilter from "./FlakePickerFilter";
@@ -16,7 +16,6 @@ function FlakePicker({ onSelectFlake }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [imageMode, setImageMode] = useState("full"); // "full" | "crop"
   const [usedFlakeIds, setUsedFlakeIds] = useState(new Set());
   const [hideUsed, setHideUsed] = useState(true);
   const [infoFlake, setInfoFlake] = useState(null);
@@ -71,17 +70,6 @@ function FlakePicker({ onSelectFlake }) {
         >
           Apply Filter
         </Button>
-        <SegmentedControl
-          mt="xs"
-          fullWidth
-          size="xs"
-          value={imageMode}
-          onChange={setImageMode}
-          data={[
-            { label: "Full image", value: "full" },
-            { label: "Cropped flake", value: "crop" },
-          ]}
-        />
         <Checkbox
           mt="xs"
           size="xs"
@@ -122,7 +110,6 @@ function FlakePicker({ onSelectFlake }) {
                 flake={flake}
                 onSelect={handleSelectFlake}
                 onInfo={(f) => setInfoFlake({ ...f, flake_material: f.chip_material })}
-                showCrop={imageMode === "crop"}
                 isUsed={usedFlakeIds.has(flake.flake_id)}
               />
             ))}

@@ -27,6 +27,7 @@
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
   align-content: start;
+  align-items: start;
 }
 
 .flakePickerGridHeader {
