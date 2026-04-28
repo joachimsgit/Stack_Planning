@@ -14,7 +14,7 @@ const MATERIAL_OUTLINE_COLORS = {
 
 const FALLBACK_COLORS = ["#ffdd00", "#E91E63", "#FF5722", "#009688", "#9C27B0", "#3F51B5", "#FF9800"];
 
-function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, onUpdateTransform, hidden, inGroup, getGroupSnapshot, onUpdateManyLayers }) {
+function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, onUpdateTransform, hidden, inGroup, getGroupSnapshot, onUpdateManyLayers, onCentroidLoaded, onImageSizeLoaded }) {
   const dragStart = useRef(null);
   const pivotRef = useRef(null);
   const [centroid, setCentroid] = useState({

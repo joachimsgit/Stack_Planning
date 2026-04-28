@@ -24,7 +24,9 @@ function FlakePickerFilter({ onChange }) {
   const [fpMax, setFpMax] = useState("");
   const [flakeId, setFlakeId] = useState("");
   const [favorite, setFavorite] = useState("all");
-  const [dateFrom, setDateFrom] = useState("");
+  const [dateFrom, setDateFrom] = useState(
+    () => new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  );
   const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {

@@ -110,7 +110,7 @@ function FlakePicker({ onSelectFlake }) {
           </div>
         ) : (
           <>
-            <Text size="xs" color="dimmed" px="xs" pt="xs">
+            <Text size="xs" color="dimmed" px="xs" pt="xs" className="flakePickerGridHeader">
               Showing {shown.length} of {filtered.length}
               {hideUsed && allFlakes.length !== filtered.length
                 ? ` (${allFlakes.length - filtered.length} used hidden)`

@@ -464,7 +464,7 @@ function StackEditorPage() {
         onClose={() => setPickerOpen(false)}
         title="Pick a Flake"
         position="right"
-        size={620}
+        size={780}
         padding={0}
         styles={{ body: { padding: 0, height: "calc(100% - 60px)", overflow: "hidden" } }}
       >

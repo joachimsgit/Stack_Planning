@@ -23,13 +23,18 @@
   overflow-y: auto;
   flex: 1;
   padding: 0.5rem;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
   align-content: start;
 }
 
+.flakePickerGridHeader {
+  grid-column: 1 / -1;
+}
+
 .flakePickerEmpty {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -39,5 +44,6 @@
 }
 
 .flakePickerLoadMore {
+  grid-column: 1 / -1;
   padding: 0.5rem;
 }
