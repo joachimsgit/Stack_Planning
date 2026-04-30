@@ -64,11 +64,13 @@ function FlakeInfoModal({ layer, opened, onClose, stackId, onMasksChanged }) {
     }
   }, [opened, layer]);
 
-  // Reset image state when switching magnification or flake
+  // Reset image state when switching magnification or flake.
+  // Use layer?.id (not layer) so a mask update on the same layer doesn't reset
+  // imgLoaded — the URL is unchanged, so onLoad won't re-fire for a cached image.
   useEffect(() => {
     setImgLoaded(false);
     setImgError(false);
-  }, [magIndex, layer]);
+  }, [magIndex, layer?.id]);
 
   function handleSaveNotes() {
     setNotesSaving(true);
