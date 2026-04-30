@@ -10,4 +10,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY . .
 
-CMD ["python", "app.py"]
+CMD ["gunicorn", "-w", "4", "--threads", "2", "-b", "0.0.0.0:5000", "--timeout", "120", "app:app"]

@@ -6,3 +6,4 @@ Pillow
 numpy
 cachetools
 opencv-python-headless
+gunicorn

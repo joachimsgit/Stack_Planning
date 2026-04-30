@@ -77,8 +77,8 @@ function HomePage() {
         setUsers(usersData);
         setUserSelectData(usersData.map((u) => ({ value: String(u.id), label: u.name })));
       })
-      .catch(() =>
-        notifications.show({ color: "red", message: "Could not load data" })
+      .catch((err) =>
+        notifications.show({ color: "red", message: `Could not load data: ${err.message}` })
       )
       .finally(() => setLoading(false));
   }, []);
@@ -108,8 +108,8 @@ function HomePage() {
       }
       const stack = await createStack(newName.trim(), "", resolvedUserId);
       navigate(`/stack/${stack.id}`);
-    } catch {
-      notifications.show({ color: "red", message: "Failed to create stack" });
+    } catch (err) {
+      notifications.show({ color: "red", message: `Failed to create stack: ${err.message}` });
     } finally {
       setCreating(false);
     }
@@ -120,8 +120,8 @@ function HomePage() {
     try {
       await deleteStack(deleteTarget.id);
       setStacks((prev) => prev.filter((s) => s.id !== deleteTarget.id));
-    } catch {
-      notifications.show({ color: "red", message: "Failed to delete stack" });
+    } catch (err) {
+      notifications.show({ color: "red", message: `Failed to delete stack: ${err.message}` });
     } finally {
       setDeleteTarget(null);
     }
