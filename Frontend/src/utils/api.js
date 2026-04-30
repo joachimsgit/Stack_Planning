@@ -211,6 +211,13 @@ export function fetchFlakes(params = {}) {
   return apiFetch(`/proxy/flakes${qs ? "?" + qs : ""}`);
 }
 
+export async function fetchFlakeById(flakeId) {
+  const results = await fetchFlakes({ flake_id: flakeId });
+  const list = Array.isArray(results) ? results : [];
+  if (!list.length) throw new Error(`Flake #${flakeId} not found`);
+  return list[0];
+}
+
 export function fetchMaterials() {
   return apiFetch("/proxy/materials");
 }

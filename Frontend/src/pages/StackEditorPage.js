@@ -25,6 +25,7 @@ import {
   updateStack,
   uploadImage,
   fetchLayerMasks,
+  fetchFlakeById,
 } from "../utils/api";
 
 // Debounce helper — returns a function that delays calling fn by `delay` ms
@@ -51,6 +52,8 @@ function StackEditorPage() {
   const [selectedLayerIds, setSelectedLayerIds] = useState(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hiddenLayers, setHiddenLayers] = useState(new Set());
+  const [flakeIdInput, setFlakeIdInput] = useState("");
+  const [flakeIdLoading, setFlakeIdLoading] = useState(false);
 
   // Kept current so drag callbacks always see the latest layer positions without
   // recreating the callback on every render.
@@ -208,6 +211,22 @@ function StackEditorPage() {
       setActiveLayerIndex(newLayer.layer_index);
     } catch (err) {
       notifications.show({ color: "red", message: `Failed to add layer: ${err.message}` });
+    }
+  };
+
+  const handleFlakeIdChange = async (raw) => {
+    const digits = raw.replace(/\D/g, "").slice(0, 6);
+    setFlakeIdInput(digits);
+    if (digits.length !== 6 || flakeIdLoading) return;
+    setFlakeIdLoading(true);
+    try {
+      const flake = await fetchFlakeById(digits);
+      await handleAddFlake(flake);
+      setFlakeIdInput("");
+    } catch (err) {
+      notifications.show({ color: "red", title: "Flake not found", message: err.message });
+    } finally {
+      setFlakeIdLoading(false);
     }
   };
 
@@ -398,6 +417,15 @@ function StackEditorPage() {
           </ActionIcon>
         </Group>
       )}
+      <TextInput
+        placeholder="Flake ID"
+        value={flakeIdInput}
+        onChange={(e) => handleFlakeIdChange(e.currentTarget.value)}
+        onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+        size="xs"
+        style={{ width: 90 }}
+        disabled={flakeIdLoading}
+      />
       <input
         ref={fileInputRef}
         type="file"
