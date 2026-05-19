@@ -10,6 +10,10 @@ import {
   Text,
   Divider,
   Table,
+  Modal,
+  List,
+  ThemeIcon,
+  Title,
 } from "@mantine/core";
 import {
   IconSun,
@@ -17,6 +21,13 @@ import {
   IconDatabase,
   IconDatabaseExport,
   IconSettings,
+  IconBrain,
+  IconHelpCircle,
+  IconLayersIntersect,
+  IconPhoto,
+  IconKeyboard,
+  IconHandClick,
+  IconBrush,
 } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
 
@@ -33,6 +44,7 @@ function AppHeader({ rightSection }) {
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
   const navigate = useNavigate();
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   return (
     <>
@@ -57,6 +69,22 @@ function AppHeader({ rightSection }) {
                 Flake Database
               </Button>
               <Button
+                component="a"
+                leftIcon={<IconBrain size="1rem" />}
+                variant="default"
+                href="http://134.61.8.242:8000/"
+                target="_blank"
+              >
+                MaskTerial Training
+              </Button>
+              <Button
+                variant="default"
+                leftIcon={<IconHelpCircle size="1rem" />}
+                onClick={() => setHelpOpen(true)}
+              >
+                Help
+              </Button>
+              <Button
                 variant="default"
                 leftIcon={<IconSettings size="1rem" />}
                 onClick={() => setOptionsOpen(true)}
@@ -67,6 +95,93 @@ function AppHeader({ rightSection }) {
           </Group>
         </div>
       </Header>
+
+      <Modal
+        opened={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        title={<Title order={4}>How to use Stack Planning</Title>}
+        size="lg"
+        centered
+      >
+        <Stack spacing="lg">
+          <Text size="sm" color="dimmed">
+            Stack Planning lets you visually compose 2D-material heterostructures by
+            overlaying microscope images of flakes from the 2DMatGMM catalogue.
+          </Text>
+
+          <div>
+            <Group spacing={6} mb={4}>
+              <ThemeIcon size="sm" variant="light" color="blue"><IconLayersIntersect size={14} /></ThemeIcon>
+              <Text weight={600} size="sm">1. Create a stack</Text>
+            </Group>
+            <Text size="sm">
+              On the home page click <b>New Stack</b>, give it a name and assign a user.
+              Stacks are grouped by user in the sidebar.
+            </Text>
+          </div>
+
+          <div>
+            <Group spacing={6} mb={4}>
+              <ThemeIcon size="sm" variant="light" color="blue"><IconPhoto size={14} /></ThemeIcon>
+              <Text weight={600} size="sm">2. Add layers</Text>
+            </Group>
+            <List size="sm" spacing={2}>
+              <List.Item>Open a stack and click <b>+</b> in the layer panel to pick a flake from the GMM database.</List.Item>
+              <List.Item>Type a 6-digit <b>Flake ID</b> in the header to add a known flake directly.</List.Item>
+              <List.Item>Use <b>Import Image</b> to upload your own microscope image as a layer.</List.Item>
+              <List.Item>Draw rectangles or polygons via the shape tools on the canvas toolbar.</List.Item>
+            </List>
+          </div>
+
+          <div>
+            <Group spacing={6} mb={4}>
+              <ThemeIcon size="sm" variant="light" color="blue"><IconHandClick size={14} /></ThemeIcon>
+              <Text weight={600} size="sm">3. Position layers</Text>
+            </Group>
+            <List size="sm" spacing={2}>
+              <List.Item>Click a layer on the canvas (or in the left panel) to select it.</List.Item>
+              <List.Item>Drag to move; Ctrl/Cmd-click to multi-select and move several layers together.</List.Item>
+              <List.Item>Use the layer panel to reorder, hide, rename, delete or adjust opacity / contrast.</List.Item>
+            </List>
+          </div>
+
+          <div>
+            <Group spacing={6} mb={4}>
+              <ThemeIcon size="sm" variant="light" color="blue"><IconBrush size={14} /></ThemeIcon>
+              <Text weight={600} size="sm">4. Refine masks</Text>
+            </Group>
+            <Text size="sm">
+              Open a flake layer's mask editor to refine the segmentation with the watershed tool —
+              useful when GMM's automatic mask isn't tight enough for stack planning.
+            </Text>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Group spacing={6} mb={4}>
+              <ThemeIcon size="sm" variant="light" color="gray"><IconKeyboard size={14} /></ThemeIcon>
+              <Text weight={600} size="sm">Keyboard shortcuts</Text>
+            </Group>
+            <Table fontSize="sm">
+              <tbody>
+                {KEYBOARD_SHORTCUTS.map(({ keys, action }) => (
+                  <tr key={keys}>
+                    <td style={{ width: "45%" }}>
+                      <Text component="span" className="shortcutKey">{keys}</Text>
+                    </td>
+                    <td>{action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+
+          <Text size="xs" color="dimmed">
+            Need to back up your data or change appearance? Open <b>Options</b> in the header.
+          </Text>
+        </Stack>
+      </Modal>
 
       <Drawer
         opened={optionsOpen}

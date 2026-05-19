@@ -55,6 +55,42 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
     [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform, zoom, inGroup, getGroupSnapshot, onUpdateManyLayers]
   );
 
+  // Drag a single vertex / corner. `onDelta` receives the pointer delta
+  // expressed in the shape's local (unrotated) coordinate space, so callers
+  // can add it directly to entries in `shape_data`.
+  const makeVertexHandler = (onDelta) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect();
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const theta = -((layer.rotation || 0) * Math.PI / 180);
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+
+    const onMove = (me) => {
+      const sx = (me.clientX - startClientX) / (zoom ?? 1);
+      const sy = (me.clientY - startClientY) / (zoom ?? 1);
+      const lx = sx * cosT - sy * sinT;
+      const ly = sx * sinT + sy * cosT;
+      onDelta(lx, ly);
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
+
+  const vertexHandle = (vx, vy, key, cursor, onDown) => (
+    <g key={key}>
+      <circle cx={vx} cy={vy} r={7} fill="white" stroke="rgba(51,154,240,0.9)"
+        strokeWidth={2} style={{ cursor }} onPointerDown={onDown}
+      />
+    </g>
+  );
+
   // Returns a pointerdown handler for the rotation handle.
   // cx/cy are the shape's rotation center in SVG/canvas coordinates.
   const makeRotateHandler = (cx, cy) => (e) => {
@@ -153,12 +189,27 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
 
   if (layer.shape_type === "rect") {
     const { x1, y1, x2, y2 } = layer.shape_data;
-    const rx = Math.min(x1, x2) + dx;
-    const ry = Math.min(y1, y2) + dy;
-    const rw = Math.abs(x2 - x1);
-    const rh = Math.abs(y2 - y1);
+    // Snapshot the normalized rect at drag start so corner deltas always apply
+    // to a known top-left / bottom-right pair, even if the user drags a corner
+    // past the opposite side.
+    const sx1 = Math.min(x1, x2), sy1 = Math.min(y1, y2);
+    const sx2 = Math.max(x1, x2), sy2 = Math.max(y1, y2);
+    const rx = sx1 + dx;
+    const ry = sy1 + dy;
+    const rw = sx2 - sx1;
+    const rh = sy2 - sy1;
     const cx = rx + rw / 2;
     const cy = ry + rh / 2;
+
+    const setRect = (nx1, ny1, nx2, ny2) =>
+      onUpdateTransform({ shape_data: { x1: nx1, y1: ny1, x2: nx2, y2: ny2 } });
+    const cornerHandlers = {
+      tl: (lx, ly) => setRect(sx1 + lx, sy1 + ly, sx2, sy2),
+      tr: (lx, ly) => setRect(sx1, sy1 + ly, sx2 + lx, sy2),
+      br: (lx, ly) => setRect(sx1, sy1, sx2 + lx, sy2 + ly),
+      bl: (lx, ly) => setRect(sx1 + lx, sy1, sx2, sy2 + ly),
+    };
+
     group = (
       <g transform={`rotate(${rotation}, ${cx}, ${cy})`}>
         <rect
@@ -168,6 +219,10 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
           onPointerDown={onPointerDown}
         />
         {isActive && selectionOverlay(rx, ry, rx + rw, ry + rh, cx, cy)}
+        {isActive && vertexHandle(rx,      ry,      "tl", "nwse-resize", makeVertexHandler(cornerHandlers.tl))}
+        {isActive && vertexHandle(rx + rw, ry,      "tr", "nesw-resize", makeVertexHandler(cornerHandlers.tr))}
+        {isActive && vertexHandle(rx + rw, ry + rh, "br", "nwse-resize", makeVertexHandler(cornerHandlers.br))}
+        {isActive && vertexHandle(rx,      ry + rh, "bl", "nesw-resize", makeVertexHandler(cornerHandlers.bl))}
       </g>
     );
   } else if (layer.shape_type === "freehand" || layer.shape_type === "polygon") {
@@ -223,12 +278,27 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
           <line x1={ax} y1={ay} x2={bx} y2={by}
             stroke={color} strokeWidth={sw} pointerEvents="none"
           />
-          {[p1, p2].map((p, i) => (
-            <g key={i}>
-              <circle cx={p[0] + dx} cy={p[1] + dy} r={4} fill="white" pointerEvents="none" />
-              <circle cx={p[0] + dx} cy={p[1] + dy} r={3} fill={color} pointerEvents="none" />
-            </g>
-          ))}
+          {[p1, p2].map((p, i) => {
+            const sp = [p[0], p[1]];
+            const onDelta = (lx, ly) => {
+              const next = [[p1[0], p1[1]], [p2[0], p2[1]]];
+              next[i] = [sp[0] + lx, sp[1] + ly];
+              onUpdateTransform({ shape_data: { points: next } });
+            };
+            return (
+              <g key={i}>
+                <circle cx={p[0] + dx} cy={p[1] + dy} r={4} fill="white" pointerEvents="none" />
+                <circle cx={p[0] + dx} cy={p[1] + dy} r={3} fill={color} pointerEvents="none" />
+                {isActive && (
+                  <circle cx={p[0] + dx} cy={p[1] + dy} r={8}
+                    fill="transparent" stroke="rgba(51,154,240,0.9)" strokeWidth={2}
+                    style={{ cursor: "grab" }}
+                    onPointerDown={makeVertexHandler(onDelta)}
+                  />
+                )}
+              </g>
+            );
+          })}
           <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
             fontSize={13} fontFamily="sans-serif" fontWeight="700"
             stroke="white" strokeWidth={4} paintOrder="stroke" fill="white"
@@ -306,12 +376,27 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
           <line x1={bx} y1={by} x2={cx2} y2={cy2}
             stroke={color} strokeWidth={sw} pointerEvents="none" />
           <path d={arcPath} fill="none" stroke={color} strokeWidth={sw} pointerEvents="none" />
-          {[p1, p2, p3].map((p, i) => (
-            <g key={i}>
-              <circle cx={p[0] + dx} cy={p[1] + dy} r={4} fill="white" pointerEvents="none" />
-              <circle cx={p[0] + dx} cy={p[1] + dy} r={3} fill={color} pointerEvents="none" />
-            </g>
-          ))}
+          {[p1, p2, p3].map((p, i) => {
+            const sp = [p[0], p[1]];
+            const onDelta = (lx, ly) => {
+              const next = [[p1[0], p1[1]], [p2[0], p2[1]], [p3[0], p3[1]]];
+              next[i] = [sp[0] + lx, sp[1] + ly];
+              onUpdateTransform({ shape_data: { points: next } });
+            };
+            return (
+              <g key={i}>
+                <circle cx={p[0] + dx} cy={p[1] + dy} r={4} fill="white" pointerEvents="none" />
+                <circle cx={p[0] + dx} cy={p[1] + dy} r={3} fill={color} pointerEvents="none" />
+                {isActive && (
+                  <circle cx={p[0] + dx} cy={p[1] + dy} r={8}
+                    fill="transparent" stroke="rgba(51,154,240,0.9)" strokeWidth={2}
+                    style={{ cursor: "grab" }}
+                    onPointerDown={makeVertexHandler(onDelta)}
+                  />
+                )}
+              </g>
+            );
+          })}
           <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
             fontSize={13} fontFamily="sans-serif" fontWeight="700"
             stroke="white" strokeWidth={4} paintOrder="stroke" fill="white"
