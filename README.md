@@ -15,14 +15,12 @@ stacks and layers created here so they survive independently of GMM.
 
 | Service | URL |
 |---------|-----|
-| 2DMatGMM Flake Database | `http://<gmm-host>/` |
-| MaskTerial Training Frontend | `http://<gmm-host>:8000/` |
+| 2DMatGMM Flake Database | <http://134.61.8.242/> |
+| MaskTerial Training Frontend | <http://134.61.8.242:8000/> |
 | Stack Planning (production) | served by the `nginx` container, default port `8080` |
 
-The concrete host (an internal LAN address at our institute) is set via the
-`REACT_APP_GMM_URL` and `REACT_APP_MASKTERIAL_URL` environment variables — see
-[Configuration](#configuration) below. The header bar inside the app links to
-the Flake Database and the MaskTerial Training frontend.
+The header bar inside the app links to the Flake Database and the MaskTerial
+Training frontend.
 
 ---
 
@@ -78,15 +76,15 @@ pip install -r requirements.txt
 python app.py                     # http://localhost:5000
 ```
 
-Environment variables:
+Environment variables (with sensible defaults for local dev):
 
-| Variable | Purpose |
-|----------|---------|
-| `GMM_API_URL` | Upstream 2DMatGMM API base URL (e.g. `http://<gmm-host>:4999`) |
-| `GMM_IMAGE_URL` | Upstream image server base URL (e.g. `http://<gmm-host>/images/`) |
-| `DATABASE_PATH` | SQLite file path (default `./stacks.db`) |
-| `FS_ROOT` | Where uploaded images are stored (default `./data`) |
-| `SCANS_ROOT` | Read-only mount for scan images (default `./scans`) |
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `GMM_API_URL` | Upstream 2DMatGMM API base URL | `http://134.61.8.242:4999` |
+| `GMM_IMAGE_URL` | Upstream image server base URL | `http://134.61.8.242/images/` |
+| `DATABASE_PATH` | SQLite file path | `./stacks.db` |
+| `FS_ROOT` | Where uploaded images are stored | `./data` |
+| `SCANS_ROOT` | Read-only mount for scan images | `./scans` |
 
 ### Frontend
 
@@ -98,23 +96,6 @@ npm start                         # http://localhost:3001
 
 Set `REACT_APP_STACK_BACKEND_URL` if your backend is not on
 `http://localhost:5000/`.
-
-### Configuration
-
-The frontend reads three URLs from environment variables (`Frontend/.env` for
-local dev, the `frontend_builder` service in `docker-compose.yml` for
-production builds):
-
-| Variable | Purpose |
-|----------|---------|
-| `REACT_APP_STACK_BACKEND_URL` | This app's own backend |
-| `REACT_APP_GMM_URL` | Link target for the **Flake Database** button |
-| `REACT_APP_MASKTERIAL_URL` | Link target for the **MaskTerial Training** button |
-| `REACT_APP_GMM_IMAGE_URL` | Base URL for flake microscope images |
-
-All four have fall-back defaults that point at our institute's internal
-network, so on a developer machine inside that network you can leave them
-unset.
 
 ---
 

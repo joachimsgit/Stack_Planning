@@ -32,8 +32,6 @@ import {
 import { useNavigate } from "react-router-dom";
 
 const BACKEND_BASE = (process.env.REACT_APP_STACK_BACKEND_URL || "http://localhost:5000/").replace(/\/$/, "");
-const GMM_URL = process.env.REACT_APP_GMM_URL || "http://134.61.8.242/";
-const MASKTERIAL_URL = process.env.REACT_APP_MASKTERIAL_URL || "http://134.61.8.242:8000/";
 
 const KEYBOARD_SHORTCUTS = [
   { keys: "Z + Scroll wheel", action: "Zoom canvas in / out" },
@@ -65,7 +63,7 @@ function AppHeader({ rightSection }) {
                 component="a"
                 leftIcon={<IconDatabase size="1rem" />}
                 variant="default"
-                href={GMM_URL}
+                href="http://134.61.8.242/"
                 target="_blank"
               >
                 Flake Database
@@ -74,7 +72,7 @@ function AppHeader({ rightSection }) {
                 component="a"
                 leftIcon={<IconBrain size="1rem" />}
                 variant="default"
-                href={MASKTERIAL_URL}
+                href="http://134.61.8.242:8000/"
                 target="_blank"
               >
                 MaskTerial Training
