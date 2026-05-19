@@ -1245,6 +1245,8 @@ def update_layer(stack_id, layer_id):
         layer.shape_color = body["shape_color"]
     if "shape_stroke_width" in body:
         layer.shape_stroke_width = float(body["shape_stroke_width"])
+    if "shape_data" in body:
+        layer.shape_data = json.dumps(body["shape_data"]) if body["shape_data"] is not None else None
 
     stack = db_session.get(Stack, stack_id)
     if stack:
