@@ -235,10 +235,7 @@ function StackEditorPage() {
     async (layerId, data) => {
       if (typeof layerId === "string") return;
       try {
-        const updated = await updateLayer(id, layerId, data);
-        setLayers((prev) =>
-          prev.map((l) => (l.id === updated.id ? updated : l))
-        );
+        await updateLayer(id, layerId, data);
       } catch {
         // silently ignore transient save errors during drag
       }
