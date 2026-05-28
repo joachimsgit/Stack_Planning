@@ -252,6 +252,50 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
         </g>
       );
     }
+  } else if (layer.shape_type === "line") {
+    const pts = (layer.shape_data?.points) || [];
+    if (pts.length === 2) {
+      const [p1, p2] = pts;
+      const ax = p1[0] + dx, ay = p1[1] + dy;
+      const bx = p2[0] + dx, by = p2[1] + dy;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      const minX = Math.min(ax, bx), minY = Math.min(ay, by);
+      const maxX = Math.max(ax, bx), maxY = Math.max(ay, by);
+      group = (
+        <g transform={`rotate(${rotation}, ${mx}, ${my})`}>
+          <line x1={ax} y1={ay} x2={bx} y2={by}
+            stroke="white" strokeWidth={sw + 2}
+            style={{ cursor: isActive ? "grab" : "pointer" }}
+            onPointerDown={onPointerDown}
+          />
+          <line x1={ax} y1={ay} x2={bx} y2={by}
+            stroke={color} strokeWidth={sw} pointerEvents="none"
+          />
+          {[p1, p2].map((p, i) => {
+            const sp = [p[0], p[1]];
+            const onDelta = (lx, ly) => {
+              const next = [[p1[0], p1[1]], [p2[0], p2[1]]];
+              next[i] = [sp[0] + lx, sp[1] + ly];
+              onUpdateTransform({ shape_data: { points: next } });
+            };
+            return (
+              <g key={i}>
+                <circle cx={p[0] + dx} cy={p[1] + dy} r={4} fill="white" pointerEvents="none" />
+                <circle cx={p[0] + dx} cy={p[1] + dy} r={3} fill={color} pointerEvents="none" />
+                {isActive && (
+                  <circle cx={p[0] + dx} cy={p[1] + dy} r={8}
+                    fill="transparent" stroke="rgba(51,154,240,0.9)" strokeWidth={2}
+                    style={{ cursor: "grab" }}
+                    onPointerDown={makeVertexHandler(onDelta)}
+                  />
+                )}
+              </g>
+            );
+          })}
+          {isActive && selectionOverlay(minX, minY, maxX, maxY, mx, my)}
+        </g>
+      );
+    }
   } else if (layer.shape_type === "distance") {
     const pts = (layer.shape_data?.points) || [];
     if (pts.length === 2) {

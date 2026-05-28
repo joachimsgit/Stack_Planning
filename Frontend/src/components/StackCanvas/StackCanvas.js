@@ -1,7 +1,7 @@
 import "./StackCanvas.css";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Text, Slider, Group, ActionIcon, Divider, Tooltip } from "@mantine/core";
-import { IconLayersIntersect, IconRectangle, IconPencil, IconRuler2, IconAngle, IconPolygon } from "@tabler/icons-react";
+import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconRuler2, IconAngle, IconPolygon } from "@tabler/icons-react";
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
 import CanvasControls from "./CanvasControls";
@@ -37,7 +37,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   const [layerDisplayModes, setLayerDisplayModes] = useState({});
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [activeTool, setActiveTool] = useState(null); // null | "rect" | "freehand" | "polygon" | "measure" | "protractor"
+  const [activeTool, setActiveTool] = useState(null); // null | "line" | "rect" | "freehand" | "polygon" | "measure" | "protractor"
   const [drawColor, setDrawColor] = useState("#2196f3");
   const [drawingShape, setDrawingShape] = useState(null);
   // Multi-click tool state (shared between measure / protractor / polygon)
@@ -182,11 +182,11 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     (e) => {
       e.preventDefault();
       const tool = activeToolRef.current;
-      if (tool !== "rect" && tool !== "freehand") return;
+      if (tool !== "line" && tool !== "rect" && tool !== "freehand") return;
       const pos = getCanvasPos(e.clientX, e.clientY);
 
-      if (tool === "rect") {
-        drawingRef.current = { type: "rect", x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y };
+      if (tool === "line" || tool === "rect") {
+        drawingRef.current = { type: tool, x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y };
       } else {
         drawingRef.current = { type: "freehand", points: [[pos.x, pos.y]] };
       }
@@ -195,7 +195,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
       const onMove = (me) => {
         if (!drawingRef.current) return;
         const p = getCanvasPos(me.clientX, me.clientY);
-        if (tool === "rect") {
+        if (tool === "line" || tool === "rect") {
           drawingRef.current = { ...drawingRef.current, x2: p.x, y2: p.y };
         } else {
           const pts = drawingRef.current.points;
@@ -214,6 +214,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
         setDrawingShape(null);
         if (!shape) return;
         if (shape.type === "rect" && Math.abs(shape.x2 - shape.x1) < 5 && Math.abs(shape.y2 - shape.y1) < 5) return;
+        if (shape.type === "line" && Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1) < 5) return;
         if (shape.type === "freehand" && shape.points.length < 3) return;
 
         const all = sortedRef.current;
@@ -225,6 +226,8 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
           shape_type: shape.type,
           shape_data: shape.type === "rect"
             ? { x1: shape.x1, y1: shape.y1, x2: shape.x2, y2: shape.y2 }
+            : shape.type === "line"
+            ? { points: [[shape.x1, shape.y1], [shape.x2, shape.y2]] }
             : { points: shape.points },
           shape_color: drawColorRef.current,
           shape_stroke_width: 2,
@@ -438,6 +441,15 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
 
           <Divider orientation="vertical" />
 
+          <Tooltip label="Line" withArrow>
+            <ActionIcon
+              size="sm"
+              variant={activeTool === "line" ? "filled" : "default"}
+              onClick={() => toggleTool("line")}
+            >
+              <IconLine size={14} />
+            </ActionIcon>
+          </Tooltip>
           <Tooltip label="Rectangle" withArrow>
             <ActionIcon
               size="sm"
@@ -592,6 +604,13 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
                     height={Math.abs(drawingShape.y2 - drawingShape.y1)}
                     fill={`${drawColor}26`} stroke={drawColor}
                     strokeWidth={2} strokeDasharray="4 2"
+                  />
+                )}
+                {drawingShape.type === "line" && (
+                  <line
+                    x1={drawingShape.x1} y1={drawingShape.y1}
+                    x2={drawingShape.x2} y2={drawingShape.y2}
+                    stroke={drawColor} strokeWidth={2} strokeDasharray="4 2"
                   />
                 )}
                 {drawingShape.type === "freehand" && drawingShape.points.length > 1 && (
