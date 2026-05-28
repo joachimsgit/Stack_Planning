@@ -1,7 +1,7 @@
 import "./StackCanvas.css";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Text, Slider, Group, ActionIcon, Divider, Tooltip } from "@mantine/core";
-import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconRuler2, IconAngle, IconPolygon } from "@tabler/icons-react";
+import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconTextSize, IconRuler2, IconAngle, IconPolygon } from "@tabler/icons-react";
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
 import CanvasControls from "./CanvasControls";
@@ -37,7 +37,8 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   const [layerDisplayModes, setLayerDisplayModes] = useState({});
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [activeTool, setActiveTool] = useState(null); // null | "line" | "rect" | "freehand" | "polygon" | "measure" | "protractor"
+  const [activeTool, setActiveTool] = useState(null); // null | "line" | "rect" | "freehand" | "polygon" | "text" | "measure" | "protractor"
+  const [pendingText, setPendingText] = useState(null); // { x, y, value } while text tool is active
   const [drawColor, setDrawColor] = useState("#2196f3");
   const [drawingShape, setDrawingShape] = useState(null);
   // Multi-click tool state (shared between measure / protractor / polygon)
@@ -48,6 +49,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   const canvasContainerRef  = useRef(null);
   const heldKey             = useRef(null);
   const drawingRef          = useRef(null);
+  const textSubmittedRef    = useRef(false);
   const drawColorRef        = useRef(drawColor);
   const activeToolRef       = useRef(activeTool);
   const sortedRef           = useRef(sorted);
@@ -73,6 +75,8 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     toolPointsRef.current = [];
     setToolPoints([]);
     setToolHover(null);
+    setPendingText(null);
+    textSubmittedRef.current = false;
   }, [activeTool]);
 
   // Key tracking
@@ -262,6 +266,32 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
       flake_material: null, flake_id: null, flake_path: null,
     });
   }, [onAddShape]);
+
+  // ── Text tool ────────────────────────────────────────────────────────────
+  const createTextShape = useCallback((text, canvasX, canvasY) => {
+    const all = sortedRef.current;
+    const nextIndex = all.length > 0 ? Math.max(...all.map((l) => l.layer_index)) + 1 : 1;
+    onAddShape({
+      id: `shape-${Date.now()}`,
+      is_shape: true,
+      shape_type: "text",
+      shape_data: { text, fontSize: 16 },
+      shape_color: drawColorRef.current,
+      shape_stroke_width: 2,
+      layer_index: nextIndex,
+      pos_x: canvasX - CANVAS_SIZE / 2,
+      pos_y: canvasY - CANVAS_SIZE / 2,
+      rotation: 0,
+      opacity: 1, brightness: 1, contrast: 1,
+      flake_material: null, flake_id: null, flake_path: null,
+    });
+  }, [onAddShape]);
+
+  const handleTextClick = useCallback((e) => {
+    e.preventDefault();
+    const pos = getCanvasPos(e.clientX, e.clientY);
+    setPendingText({ x: pos.x, y: pos.y, value: "" });
+  }, [getCanvasPos]);
 
   // ── Multi-click tool handlers (measure / protractor / polygon) ───────────
   // Uses toolPointsRef (not toolPoints state) so rapid clicks see the latest value,
@@ -475,6 +505,15 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
               onClick={() => toggleTool("polygon")}
             >
               <IconPolygon size={14} />
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Text (click to place, Enter to confirm, Esc to cancel)" withArrow>
+            <ActionIcon
+              size="sm"
+              variant={activeTool === "text" ? "filled" : "default"}
+              onClick={() => toggleTool("text")}
+            >
+              <IconTextSize size={14} />
             </ActionIcon>
           </Tooltip>
           <Tooltip label="Shape colour" withArrow>
@@ -735,8 +774,8 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
               </svg>
             )}
 
-            {/* Drawing capture overlay (rect / freehand — drag-based) */}
-            {activeTool && activeTool !== "measure" && activeTool !== "protractor" && activeTool !== "polygon" && (
+            {/* Drawing capture overlay (line / rect / freehand — drag-based) */}
+            {activeTool && activeTool !== "text" && activeTool !== "measure" && activeTool !== "protractor" && activeTool !== "polygon" && (
               <div
                 style={{ position: "absolute", inset: 0, zIndex: 999, cursor: "crosshair" }}
                 onPointerDown={handleDrawStart}
@@ -750,6 +789,62 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
                 onPointerDown={handleToolPointerDown}
                 onPointerMove={handleToolPointerMove}
                 onDoubleClick={handleToolDoubleClick}
+              />
+            )}
+
+            {/* Text tool: click-to-place overlay */}
+            {activeTool === "text" && !pendingText && (
+              <div
+                style={{ position: "absolute", inset: 0, zIndex: 999, cursor: "text" }}
+                onPointerDown={handleTextClick}
+              />
+            )}
+
+            {/* Text input while placing */}
+            {pendingText && (
+              <textarea
+                autoFocus
+                rows={Math.max(1, pendingText.value.split("\n").length)}
+                style={{
+                  position: "absolute",
+                  left: pendingText.x,
+                  top: pendingText.y,
+                  minWidth: 80,
+                  border: `1.5px dashed ${drawColor}`,
+                  background: "rgba(255,255,255,0.9)",
+                  fontSize: 16,
+                  fontFamily: "sans-serif",
+                  color: drawColor,
+                  padding: "2px 4px",
+                  resize: "none",
+                  outline: "none",
+                  zIndex: 1000,
+                  lineHeight: "1.4",
+                }}
+                value={pendingText.value}
+                onChange={(e) => setPendingText((p) => ({ ...p, value: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    textSubmittedRef.current = true;
+                    const { x, y, value } = pendingText;
+                    setPendingText(null);
+                    setActiveTool(null);
+                    if (value.trim()) createTextShape(value, x, y);
+                  } else if (e.key === "Escape") {
+                    textSubmittedRef.current = true;
+                    setPendingText(null);
+                    setActiveTool(null);
+                  }
+                }}
+                onBlur={(e) => {
+                  if (textSubmittedRef.current) { textSubmittedRef.current = false; return; }
+                  const val = e.target.value;
+                  const { x, y } = pendingText;
+                  setPendingText(null);
+                  setActiveTool(null);
+                  if (val.trim()) createTextShape(val, x, y);
+                }}
               />
             )}
           </div>

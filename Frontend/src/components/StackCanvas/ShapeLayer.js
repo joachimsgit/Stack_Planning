@@ -296,6 +296,52 @@ function ShapeLayer({ layer, isActive, zoom, onSelect, onUpdateTransform, hidden
         </g>
       );
     }
+  } else if (layer.shape_type === "text") {
+    const { text, fontSize = 16 } = layer.shape_data || {};
+    if (text) {
+      const lines = text.split("\n");
+      const cx = CANVAS_SIZE / 2 + dx;
+      const cy = CANVAS_SIZE / 2 + dy;
+      const approxCharW = fontSize * 0.6;
+      const lineH = fontSize * 1.4;
+      const approxW = Math.max(...lines.map((l) => l.length)) * approxCharW;
+      const approxH = lines.length * lineH;
+      // Selection box: text renders with baseline at cy, so top is cy - fontSize
+      const minX = cx;
+      const minY = cy - fontSize;
+      const maxX = cx + approxW;
+      const maxY = cy + (lines.length - 1) * lineH + fontSize * 0.3;
+      const rcx = cx + approxW / 2;
+      const rcy = cy - fontSize / 2;
+      group = (
+        <g transform={`rotate(${rotation}, ${rcx}, ${rcy})`}>
+          <text
+            x={cx} y={cy}
+            fontSize={fontSize}
+            fontFamily="sans-serif"
+            fill={color}
+            stroke="white"
+            strokeWidth={3}
+            paintOrder="stroke"
+            pointerEvents={isActive ? "none" : "auto"}
+            style={{ userSelect: "none" }}
+            onPointerDown={isActive ? undefined : onPointerDown}
+          >
+            {lines.map((line, i) => (
+              <tspan key={i} x={cx} dy={i === 0 ? 0 : lineH}>{line}</tspan>
+            ))}
+          </text>
+          {/* Invisible grab area covering the text bounds */}
+          <rect
+            x={minX} y={minY} width={approxW || 40} height={approxH || lineH}
+            fill="transparent"
+            style={{ cursor: isActive ? "grab" : "pointer" }}
+            onPointerDown={onPointerDown}
+          />
+          {isActive && selectionOverlay(minX, minY, maxX, maxY, rcx, rcy)}
+        </g>
+      );
+    }
   } else if (layer.shape_type === "distance") {
     const pts = (layer.shape_data?.points) || [];
     if (pts.length === 2) {
