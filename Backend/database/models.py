@@ -162,6 +162,29 @@ class StackLayer(Base):
         return d
 
 
+class ActivitySession(Base):
+    """One row per distinct client (keyed by IP), updated as they use the site.
+
+    Used by the /activity endpoint so an admin can tell whether anyone is
+    currently using the app before rebuilding the container. Shared via SQLite
+    so it aggregates across all gunicorn workers.
+    """
+    __tablename__ = "activity_sessions"
+
+    client_id = Column(String(128), primary_key=True)
+    last_seen = Column(Float, nullable=False, default=lambda: time.time())
+    last_path = Column(String(255), nullable=True)
+    user_agent = Column(String(255), nullable=True)
+
+    def to_dict(self):
+        return {
+            "client_id": self.client_id,
+            "last_seen": self.last_seen,
+            "last_path": self.last_path,
+            "user_agent": self.user_agent,
+        }
+
+
 class LayerMask(Base):
     """User-painted watershed mask for one (layer, base_image) pair."""
     __tablename__ = "layer_masks"

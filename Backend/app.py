@@ -31,8 +31,9 @@ from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
 from sqlalchemy.orm import subqueryload
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from database.database import create_db_engine, create_session_factory, init_db, run_migrations
-from database.models import User, Stack, StackLayer, FlakeNote, LayerMask
+from database.models import User, Stack, StackLayer, FlakeNote, LayerMask, ActivitySession
 from database import filesystem_mirror as fs_mirror
 from services import flake_proxy
 
@@ -120,6 +121,115 @@ def json_response(data, status=200):
 @app.route("/", methods=["GET"])
 def health():
     return json_response({"status": "ok", "service": "stack-planning"})
+
+
+# ---------------------------------------------------------------------------
+# Activity tracking — lets an admin check whether anyone is currently using the
+# site before rebuilding the container. State lives in SQLite so it aggregates
+# across all gunicorn workers (the production image runs 4).
+# ---------------------------------------------------------------------------
+
+# Per-worker throttle: avoid a DB write on every request (a single drag fires
+# many debounced PUTs). One write per client per this many seconds is plenty.
+ACTIVITY_WRITE_THROTTLE = 15  # seconds
+_activity_last_write = {}
+
+
+def _client_id():
+    """Identify the caller. Behind nginx the real client IP arrives in
+    X-Real-IP (see etc/nginx.conf); fall back to remote_addr in local dev."""
+    return (request.headers.get("X-Real-IP") or request.remote_addr or "unknown").strip()
+
+
+def _record_activity(client_id, path, user_agent):
+    """Upsert the client's last-seen row. Atomic across workers via ON CONFLICT."""
+    now = time.time()
+    session = db_session()
+    try:
+        stmt = sqlite_insert(ActivitySession.__table__).values(
+            client_id=client_id, last_seen=now,
+            last_path=(path or "")[:255], user_agent=(user_agent or "")[:255],
+        ).on_conflict_do_update(
+            index_elements=["client_id"],
+            set_={"last_seen": now, "last_path": (path or "")[:255], "user_agent": (user_agent or "")[:255]},
+        )
+        session.execute(stmt)
+        session.commit()
+    except Exception as e:  # never let tracking break a real request
+        session.rollback()
+        app.logger.warning("activity tracking failed: %s", e)
+    finally:
+        db_session.remove()
+
+
+@app.before_request
+def _track_activity():
+    if request.method == "OPTIONS":
+        return
+    path = request.path
+    # Don't let health checks or activity-polling traffic register as activity.
+    if path == "/" or path.startswith("/activity"):
+        return
+    cid = _client_id()
+    now = time.time()
+    if now - _activity_last_write.get(cid, 0) < ACTIVITY_WRITE_THROTTLE:
+        return
+    _activity_last_write[cid] = now
+    _record_activity(cid, path, request.headers.get("User-Agent", ""))
+
+
+@app.route("/activity/ping", methods=["POST"])
+def activity_ping():
+    """Heartbeat from an open browser tab so idle-but-open sessions still show
+    up (passive request-tracking alone misses a tab that isn't doing anything).
+    Body: { "path": "/stack/3" } — the SPA route the user is viewing."""
+    body = request.get_json(force=True, silent=True) or {}
+    cid = _client_id()
+    _record_activity(cid, body.get("path") or "/", request.headers.get("User-Agent", ""))
+    _activity_last_write[cid] = time.time()
+    return json_response({"ok": True})
+
+
+@app.route("/activity", methods=["GET"])
+def get_activity():
+    """List clients seen within the last `window` minutes (default 5).
+
+    If an `admin_token` is configured (config.json or ADMIN_TOKEN env var), the
+    caller must pass a matching `?token=`; otherwise the endpoint is open.
+    """
+    admin_token = config.get("admin_token") or os.environ.get("ADMIN_TOKEN")
+    if admin_token and request.args.get("token") != admin_token:
+        return json_response({"error": "unauthorized"}, 401)
+
+    try:
+        window_min = max(0.0, float(request.args.get("window", 5)))
+    except ValueError:
+        window_min = 5.0
+    cutoff = time.time() - window_min * 60
+
+    session = db_session()
+    try:
+        rows = (
+            session.query(ActivitySession)
+            .filter(ActivitySession.last_seen >= cutoff)
+            .order_by(ActivitySession.last_seen.desc())
+            .all()
+        )
+        now = time.time()
+        sessions = [{
+            "ip": r.client_id,
+            "last_path": r.last_path,
+            "seconds_ago": round(now - r.last_seen, 1),
+            "user_agent": r.user_agent,
+        } for r in rows]
+    finally:
+        db_session.remove()
+
+    return json_response({
+        "active_count": len(sessions),
+        "window_minutes": window_min,
+        "sessions": sessions,
+    })
 
 
 # ---------------------------------------------------------------------------

@@ -479,6 +479,7 @@ function StackEditorPage() {
             onUpdateManyLayers={handleUpdateManyLayers}
             onAddShape={handleAddShape}
             hiddenLayers={hiddenLayers}
+            stackMeta={stack}
           />
         </div>
       </div>

@@ -5,3 +5,5 @@ Frontend/node_modules/
 **/__pycache__/
 **/*.pyc
 **/*.pyo
+*.db
+*.sqlite3

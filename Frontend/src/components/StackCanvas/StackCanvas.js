@@ -1,7 +1,8 @@
 import "./StackCanvas.css";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Text, Slider, Group, ActionIcon, Divider, Tooltip } from "@mantine/core";
-import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconTextSize, IconRuler2, IconAngle, IconPolygon } from "@tabler/icons-react";
+import { Text, Slider, Group, ActionIcon, Divider, Tooltip, Menu } from "@mantine/core";
+import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconTextSize, IconRuler2, IconAngle, IconPolygon, IconDownload, IconPhoto, IconFileText } from "@tabler/icons-react";
+import { notifications } from "@mantine/notifications";
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
 import CanvasControls from "./CanvasControls";
@@ -10,6 +11,7 @@ import {
   REFERENCE_FILENAME,
   CANONICAL_DISPLAY_WIDTH,
 } from "../../utils/calibration";
+import { exportStackPng, exportStackReport } from "../../utils/stackExport";
 
 const CANVAS_SIZE = 700;
 const ROTATION_STEP = 3;
@@ -29,7 +31,7 @@ const UM_PER_CANVAS_PX = (REF_CAL.um_per_px * REF_CAL.native_w) / CANONICAL_DISP
 // Nice round values used to auto-select scale bar label
 const NICE_UM = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 
-function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onUpdateLayer, onUpdateManyLayers, onAddShape, hiddenLayers }) {
+function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onUpdateLayer, onUpdateManyLayers, onAddShape, hiddenLayers, stackMeta }) {
   const groupIds = selectedLayerIds || new Set();
   const sorted = [...layers].sort((a, b) => a.layer_index - b.layer_index);
   const activeLayer = sorted.find((l) => l.layer_index === activeLayerIndex) || null;
@@ -405,7 +407,10 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   };
 
   // ── Helpers ──────────────────────────────────────────────────────────────
-  const getDisplayModes = (layerId) => ({ ...DEFAULT_DISPLAY_MODES, ...(layerDisplayModes[layerId] || {}) });
+  const getDisplayModes = useCallback(
+    (layerId) => ({ ...DEFAULT_DISPLAY_MODES, ...(layerDisplayModes[layerId] || {}) }),
+    [layerDisplayModes]
+  );
   const toggleDisplayMode = (layerId, mode) => {
     setLayerDisplayModes((prev) => {
       const cur = { ...DEFAULT_DISPLAY_MODES, ...(prev[layerId] || {}) };
@@ -452,6 +457,30 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   };
 
   const toggleTool = (tool) => setActiveTool((t) => (t === tool ? null : tool));
+
+  const [exporting, setExporting] = useState(false);
+  const runExport = useCallback(async (kind) => {
+    if (exporting) return;
+    if (!sortedRef.current.length) {
+      notifications.show({ color: "yellow", message: "Nothing to export — add a layer first." });
+      return;
+    }
+    setExporting(true);
+    try {
+      const opts = {
+        layers: sortedRef.current,
+        hiddenLayers,
+        getDisplayModes,
+        stackMeta,
+      };
+      if (kind === "png") await exportStackPng(opts);
+      else await exportStackReport(opts);
+    } catch (err) {
+      notifications.show({ color: "red", title: "Export failed", message: err.message || String(err) });
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, hiddenLayers, stackMeta, getDisplayModes]);
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -549,6 +578,27 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
               <IconAngle size={14} />
             </ActionIcon>
           </Tooltip>
+
+          <Divider orientation="vertical" />
+
+          <Menu shadow="md" width={200} position="bottom-end" withArrow>
+            <Menu.Target>
+              <Tooltip label="Export stack" withArrow>
+                <ActionIcon size="sm" variant="default" loading={exporting}>
+                  <IconDownload size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>Export</Menu.Label>
+              <Menu.Item icon={<IconPhoto size={14} />} onClick={() => runExport("png")}>
+                Image (PNG)
+              </Menu.Item>
+              <Menu.Item icon={<IconFileText size={14} />} onClick={() => runExport("report")}>
+                Stack report (PDF)
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       </div>
 

@@ -17,7 +17,7 @@ def create_db_engine(config: dict):
 
 
 def init_db(engine):
-    from database.models import User, Stack, StackLayer, FlakeNote, LayerMask  # noqa: F401 — registers models
+    from database.models import User, Stack, StackLayer, FlakeNote, LayerMask, ActivitySession  # noqa: F401 — registers models
     Base.metadata.create_all(bind=engine)
 
 

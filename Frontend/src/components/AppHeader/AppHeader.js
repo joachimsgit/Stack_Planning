@@ -1,5 +1,5 @@
 import "./AppHeader.css";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Group,
   Header,
@@ -14,6 +14,9 @@ import {
   List,
   ThemeIcon,
   Title,
+  Badge,
+  Loader,
+  ActionIcon,
 } from "@mantine/core";
 import {
   IconSun,
@@ -28,10 +31,15 @@ import {
   IconKeyboard,
   IconHandClick,
   IconBrush,
+  IconUsers,
+  IconRefresh,
 } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
+import { fetchActivity } from "../../utils/api";
 
 const BACKEND_BASE = (process.env.REACT_APP_STACK_BACKEND_URL || "http://localhost:5000/").replace(/\/$/, "");
+
+const ACTIVITY_WINDOW_MIN = 5;
 
 const KEYBOARD_SHORTCUTS = [
   { keys: "Z + Scroll wheel", action: "Zoom canvas in / out" },
@@ -45,6 +53,24 @@ function AppHeader({ rightSection }) {
   const navigate = useNavigate();
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+
+  const [activity, setActivity] = useState(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState(false);
+
+  const loadActivity = useCallback(() => {
+    setActivityLoading(true);
+    setActivityError(false);
+    fetchActivity(ACTIVITY_WINDOW_MIN)
+      .then(setActivity)
+      .catch(() => setActivityError(true))
+      .finally(() => setActivityLoading(false));
+  }, []);
+
+  // Refresh the active-session list whenever the Options drawer is opened.
+  useEffect(() => {
+    if (optionsOpen) loadActivity();
+  }, [optionsOpen, loadActivity]);
 
   return (
     <>
@@ -219,6 +245,53 @@ function AppHeader({ rightSection }) {
             >
               Backup DB
             </Button>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Group position="apart" mb="xs">
+              <Group spacing={6}>
+                <IconUsers size={16} />
+                <Text weight={600} size="sm">Active sessions</Text>
+                {activity && (
+                  <Badge color={activity.active_count > 0 ? "green" : "gray"} variant="filled">
+                    {activity.active_count}
+                  </Badge>
+                )}
+              </Group>
+              <ActionIcon variant="subtle" onClick={loadActivity} title="Refresh" loading={activityLoading}>
+                <IconRefresh size={16} />
+              </ActionIcon>
+            </Group>
+
+            <Text size="xs" color="dimmed" mb="xs">
+              Browsers active in the last {ACTIVITY_WINDOW_MIN} min. Check this is
+              empty (only you) before rebuilding the container.
+            </Text>
+
+            {activityLoading && !activity ? (
+              <Group spacing="xs"><Loader size="xs" /><Text size="xs" color="dimmed">Loading…</Text></Group>
+            ) : activityError ? (
+              <Text size="xs" color="red">Could not load activity.</Text>
+            ) : activity && activity.sessions.length > 0 ? (
+              <Table fontSize="xs" verticalSpacing={4}>
+                <thead>
+                  <tr><th>Client</th><th>Viewing</th><th>Last seen</th></tr>
+                </thead>
+                <tbody>
+                  {activity.sessions.map((s) => (
+                    <tr key={s.ip}>
+                      <td>{s.ip}</td>
+                      <td>{s.last_path || "—"}</td>
+                      <td>{s.seconds_ago < 60 ? `${Math.round(s.seconds_ago)}s ago` : `${Math.round(s.seconds_ago / 60)}m ago`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : (
+              <Text size="xs" color="dimmed">No active sessions.</Text>
+            )}
           </div>
 
           <Divider />

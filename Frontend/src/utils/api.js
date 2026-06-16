@@ -235,6 +235,26 @@ export function fetchUsedFlakeIds() {
 }
 
 // ---------------------------------------------------------------------------
+// Activity / presence
+// ---------------------------------------------------------------------------
+
+// Heartbeat from an open tab. Fire-and-forget — never surfaces errors to the UI.
+// `keepalive` lets it complete even if fired during page unload.
+export function pingActivity(path) {
+  return fetch(`${BASE}/activity/ping`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+// List clients seen in the last `windowMinutes` minutes.
+export function fetchActivity(windowMinutes = 5) {
+  return apiFetch(`/activity?window=${windowMinutes}`);
+}
+
+// ---------------------------------------------------------------------------
 // Flake notes
 // ---------------------------------------------------------------------------
 
