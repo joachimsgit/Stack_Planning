@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Paper, Text, Group, Loader } from "@mantine/core";
-import { IconLayersIntersect } from "@tabler/icons-react";
+import { Paper, Text, Group, Loader, Tooltip } from "@mantine/core";
+import { IconLayersIntersect, IconInfoCircle } from "@tabler/icons-react";
 import { computeOverlap, layerHasSilhouette } from "../../utils/overlap";
+
+const ANCHORED_HINT =
+  "Overlap fraction is measured from the displayed masks, then scaled by each " +
+  "flake's catalogued size to anchor the absolute area. Still approximate — mask " +
+  "edges and positioning add a few percent of uncertainty.";
+
+const RAW_HINT =
+  "Estimated from the displayed masks using the scale-bar calibration (no " +
+  "catalogued flake size available to anchor it). Accurate to roughly ±10%.";
 
 // Format an area in µm² with precision that scales to magnitude.
 function fmtArea(um2) {
@@ -84,6 +93,18 @@ function OverlapReadout({ layerA, layerB }) {
         <Text size="xs" weight={600} style={{ whiteSpace: "nowrap" }}>
           Contact area
         </Text>
+        <Tooltip
+          label={state.status === "ready" && state.anchored ? ANCHORED_HINT : RAW_HINT}
+          multiline
+          w={220}
+          withArrow
+          position="bottom"
+          events={{ hover: true, focus: true, touch: true }}
+        >
+          {/* pointerEvents re-enabled here only — the panel itself ignores
+              pointer events so it never blocks canvas interaction. */}
+          <IconInfoCircle size={13} style={{ pointerEvents: "auto", cursor: "help", opacity: 0.6 }} />
+        </Tooltip>
       </Group>
 
       <Text size="xs" color="dimmed" mb={6} style={{ whiteSpace: "nowrap" }}>
@@ -93,9 +114,10 @@ function OverlapReadout({ layerA, layerB }) {
       {state.status === "ready" ? (
         <>
           <Text size="lg" weight={700} style={{ lineHeight: 1.1 }}>
-            {fmtArea(state.overlapUm2)}
+            ≈ {fmtArea(state.overlapUm2)}
           </Text>
           <Text size="xs" color="dimmed" mt={2}>
+            {state.anchored ? "" : "±10% · "}
             {(state.fractionOfSmaller * 100).toFixed(0)}% of smaller flake
           </Text>
         </>

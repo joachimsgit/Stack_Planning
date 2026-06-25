@@ -100,8 +100,15 @@ async function rasterizeSilhouette(layer, scale) {
 /**
  * Compute the overlapping contact area of two flake layers.
  *
+ * The absolute area is anchored to the flakes' catalogued sizes: the overlap
+ * *fraction* of each flake is calibration-independent (a ratio measured within
+ * one rasterization), so multiplying it by the trusted `flake_size` yields a far
+ * more accurate area than a raw pixel→µm² conversion. Both flakes give an
+ * independent estimate of the same overlap; the trusted ones are averaged.
+ *
  * @returns {Promise<null | {
- *   overlapUm2: number, areaAUm2: number, areaBUm2: number, fractionOfSmaller: number
+ *   overlapUm2: number, areaAUm2: number, areaBUm2: number,
+ *   fractionOfSmaller: number, anchored: boolean
  * }>} null if either silhouette is unavailable.
  */
 export async function computeOverlap(layerA, layerB, { scale = 3 } = {}) {
@@ -131,15 +138,37 @@ export async function computeOverlap(layerA, layerB, { scale = 3 } = {}) {
     sumBoth += ca < cb ? ca : cb;
   }
 
+  // Calibration-independent coverage fractions (overlap ÷ each flake's own area).
+  const coverA = sumA > 0 ? sumBoth / sumA : 0;
+  const coverB = sumB > 0 ? sumBoth / sumB : 0;
+
   const pxUm2 = (UM_PER_CANVAS_PX / scale) ** 2;
-  const overlapUm2 = sumBoth * pxUm2;
-  const areaAUm2 = sumA * pxUm2;
-  const areaBUm2 = sumB * pxUm2;
+  const rawOverlapUm2 = sumBoth * pxUm2;
+
+  // Catalogued flake areas (from GMM), trusted over the raw pixel→µm² area.
+  const sizeA = typeof layerA.flake_size === "number" && layerA.flake_size > 0 ? layerA.flake_size : null;
+  const sizeB = typeof layerB.flake_size === "number" && layerB.flake_size > 0 ? layerB.flake_size : null;
+
+  // coverA·sizeA and coverB·sizeB are two independent estimates of the same
+  // overlap area; average whichever are anchored to a trusted flake size.
+  const estimates = [];
+  if (sizeA != null) estimates.push(coverA * sizeA);
+  if (sizeB != null) estimates.push(coverB * sizeB);
+  const anchored = estimates.length > 0;
+  const overlapUm2 = anchored
+    ? estimates.reduce((s, v) => s + v, 0) / estimates.length
+    : rawOverlapUm2;
+
+  // Reference areas for "% of smaller flake" — prefer catalogued sizes.
+  const areaAUm2 = sizeA ?? sumA * pxUm2;
+  const areaBUm2 = sizeB ?? sumB * pxUm2;
   const smaller = Math.min(areaAUm2, areaBUm2);
+
   return {
     overlapUm2,
     areaAUm2,
     areaBUm2,
-    fractionOfSmaller: smaller > 0 ? overlapUm2 / smaller : 0,
+    anchored,
+    fractionOfSmaller: smaller > 0 ? Math.min(overlapUm2 / smaller, 1) : 0,
   };
 }
