@@ -14,7 +14,7 @@ const MATERIAL_OUTLINE_COLORS = {
 
 const FALLBACK_COLORS = ["#ffdd00", "#E91E63", "#FF5722", "#009688", "#9C27B0", "#3F51B5", "#FF9800"];
 
-function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, onUpdateTransform, hidden, inGroup, getGroupSnapshot, onUpdateManyLayers, onCentroidLoaded, onImageSizeLoaded }) {
+function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, onCanvasPick, onUpdateTransform, hidden, inGroup, getGroupSnapshot, onUpdateManyLayers, onCentroidLoaded, onImageSizeLoaded }) {
   const dragStart = useRef(null);
   const pivotRef = useRef(null);
   const [centroid, setCentroid] = useState({
@@ -77,6 +77,13 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
     (e) => {
       e.preventDefault();
       e.stopPropagation(); // prevent bubbling to container's pan/deselect handler
+
+      // This div is rectangular and may cover transparent corners that overlap a
+      // different (smaller) flake. Let the canvas picker decide by silhouette: if
+      // it hands the click to another flake, bail. It returns false when the pick
+      // resolves to this same active layer (or this group), so native drag runs.
+      if (onCanvasPick && onCanvasPick(e, { fromLayer: true })) return;
+
       onSelect();
 
       const groupSnap = inGroup && getGroupSnapshot ? getGroupSnapshot() : null;
@@ -118,7 +125,7 @@ function LayerImage({ layer, isActive, isBottom, displayModes, zoom, onSelect, o
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
     },
-    [layer.pos_x, layer.pos_y, onSelect, onUpdateTransform, zoom, inGroup, getGroupSnapshot, onUpdateManyLayers]
+    [layer.pos_x, layer.pos_y, onSelect, onCanvasPick, onUpdateTransform, zoom, inGroup, getGroupSnapshot, onUpdateManyLayers]
   );
 
   const onRotatePointerDown = useCallback(

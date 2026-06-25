@@ -13,6 +13,7 @@ import {
   CANONICAL_DISPLAY_WIDTH,
 } from "../../utils/calibration";
 import { exportStackPng, exportStackReport } from "../../utils/stackExport";
+import { warmFlakePicker, pickFlakeAt } from "../../utils/flakePick";
 
 const CANVAS_SIZE = 700;
 const ROTATION_STEP = 3;
@@ -85,6 +86,23 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     setPendingText(null);
     textSubmittedRef.current = false;
   }, [activeTool]);
+
+  // ── Click-to-select hit testing ──────────────────────────────────────────
+  // Pre-resolve each flake's silhouette geometry so a pointerdown can pick the
+  // intended flake synchronously. The signature excludes position/rotation (so
+  // it doesn't re-warm during drags) and changes only when the flake set or a
+  // mask/base image changes.
+  const flakeSignature = sorted
+    .filter((l) => !l.is_shape)
+    .map((l) => {
+      const bf = l.canvas_base_filename || "raw_img.png";
+      const mask = (l.masks && l.masks[bf]) || "";
+      return `${l.id}:${l.is_local ? l.local_image_url : l.flake_path}:${bf}:${mask}`;
+    })
+    .join("|");
+  useEffect(() => {
+    warmFlakePicker(sortedRef.current.filter((l) => !l.is_shape));
+  }, [flakeSignature]);
 
   // Key tracking
   useEffect(() => {
@@ -161,12 +179,68 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     return { x: (clientX - rect.left) / zoomRef.current, y: (clientY - rect.top) / zoomRef.current };
   }, []);
 
-  // ── Canvas background pan + deselect ────────────────────────────────────
+  // Drag a single layer from its current position — used when a click selects a
+  // previously-inactive flake, so select + drag happen in one gesture.
+  const startLayerDrag = useCallback((layer, e) => {
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const startX = layer.pos_x || 0;
+    const startY = layer.pos_y || 0;
+    const onMove = (me) => {
+      const dx = (me.clientX - startClientX) / (zoomRef.current ?? 1);
+      const dy = (me.clientY - startClientY) / (zoomRef.current ?? 1);
+      onUpdateLayer(layer.id, { pos_x: startX + dx, pos_y: startY + dy });
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  }, [onUpdateLayer]);
+
+  // Resolve which flake a click meant (smallest covering silhouette) and act on
+  // it. Returns true if a flake was selected, false if the click hit no flake or
+  // should fall through to the caller's default (native layer drag / pan).
+  //   opts.fromLayer — call originates from a layer's own pointer handler, whose
+  //   native drag should win when the pick resolves to that same active layer or
+  //   to a member of the current multi-selection.
+  const pickAndSelect = useCallback((point, e, opts = {}) => {
+    const pickedId = pickFlakeAt(sortedRef.current, point);
+    if (pickedId == null) return false;
+    const gIds = groupIdsRef.current;
+    // Keep a multi-selection intact: let the native group-drag handler take it.
+    if (gIds.size > 1 && gIds.has(pickedId)) return false;
+    const layer = sortedRef.current.find((l) => l.id === pickedId);
+    if (!layer) return false;
+    // Pick resolved to the already-active layer → let its native drag run.
+    if (opts.fromLayer && layer.layer_index === activeLayerIndexRef.current && gIds.size <= 1) {
+      return false;
+    }
+    if (e && (e.ctrlKey || e.metaKey)) {
+      onSelectLayer(layer.layer_index, { toggle: true });
+      return true;
+    }
+    onSelectLayer(layer.layer_index);
+    startLayerDrag(layer, e);
+    return true;
+  }, [onSelectLayer, startLayerDrag]);
+
+  // Bridge from a raw pointer event (layer handlers / container) to the picker.
+  const canvasPickFromEvent = useCallback(
+    (e, opts) => pickAndSelect(getCanvasPos(e.clientX, e.clientY), e, opts),
+    [getCanvasPos, pickAndSelect]
+  );
+
+  // ── Canvas background: pick a flake, else pan + deselect ─────────────────
   const handleContainerPointerDown = useCallback(
     (e) => {
       if (activeToolRef.current) return; // tool overlays handle their own events
       e.preventDefault();
-      onSelectLayer(null); // deselect active layer
+      // A click reaching the container missed every active/group layer's own
+      // handler; try to select an underlying flake by its silhouette first.
+      if (canvasPickFromEvent(e)) return;
+      onSelectLayer(null); // empty space → deselect
 
       const startClientX = e.clientX;
       const startClientY = e.clientY;
@@ -185,7 +259,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
     },
-    [onSelectLayer]
+    [onSelectLayer, canvasPickFromEvent]
   );
 
   // ── Drawing handlers ─────────────────────────────────────────────────────
@@ -678,6 +752,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
                   displayModes={getDisplayModes(layer.id)}
                   zoom={zoom}
                   onSelect={handleSelect}
+                  onCanvasPick={canvasPickFromEvent}
                   onUpdateTransform={(data) => onUpdateLayer(layer.id, data)}
                   hidden={isHidden}
                   inGroup={inGroup}
