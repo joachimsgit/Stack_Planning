@@ -30,7 +30,7 @@ function CanvasControls({ layer, displayModes, onToggleMode, onSetDisplayColor, 
     fetchAvailableImages(layer.flake_path)
       .then((data) => setImageExists(data))
       .catch(() => setImageExists({}));
-  }, [layer?.flake_path, layer?.id]);
+  }, [layer?.flake_path, layer?.id, layer?.is_shape, layer?.is_local]);
 
   if (!layer) {
     return <Text size="xs" color="dimmed" align="center">Select a layer to adjust its settings</Text>;

@@ -430,7 +430,7 @@ function StackEditorPage() {
         navigate("/");
       })
       .finally(() => setLoading(false));
-  }, [id, navigate]);
+  }, [id, navigate, resetHistory]);
 
   // -----------------------------------------------------------------------
   // Layer callbacks

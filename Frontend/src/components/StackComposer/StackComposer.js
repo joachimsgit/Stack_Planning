@@ -1,6 +1,6 @@
 import "./StackComposer.css";
 import { useState, useEffect } from "react";
-import { ActionIcon, Badge, Button, Group, Text } from "@mantine/core";
+import { ActionIcon, Badge, Button, Text } from "@mantine/core";
 import {
   IconTrash,
   IconChevronUp,

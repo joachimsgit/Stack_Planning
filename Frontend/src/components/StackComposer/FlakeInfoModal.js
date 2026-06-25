@@ -104,7 +104,6 @@ function FlakeInfoModal({ layer, opened, onClose, stackId, onMasksChanged }) {
   // imageExists[file] is true/false once fetched; null/undefined means still loading (treat as available)
   const currentImageAvailable = imageExists === null || imageExists[currentMag.file] !== false;
   const isOverview = currentMag.file === "overview_marked.jpg";
-  const canPaintMask = Boolean(stackId) && !isOverview && currentImageAvailable;
   const hasMaskForMag = Boolean(layer.masks && layer.masks[currentMag.file]);
 
   return (
