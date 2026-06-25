@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal, Button, Group, Slider, Text, Stack, Divider, Loader, Alert } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
-import { flakeImageUrl, createWatershedMask, deleteLayerMask, resolveLocalImageUrl } from "../../utils/api";
+import { flakeImageUrl, createWatershedMask, autoWatershedMasks, deleteLayerMask, resolveLocalImageUrl } from "../../utils/api";
 
 /**
  * Paint foreground ("flake") + background scribbles on the selected base image;
@@ -22,6 +22,7 @@ function WatershedEditor({ opened, onClose, stackId, layer, imageFilename, onSav
   const [brushRadius, setBrushRadius] = useState(15);
   const [strokes, setStrokes] = useState([]); // [{mode, points: [[nx, ny], ...]}]
   const [generating, setGenerating] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
   const [maskUrl, setMaskUrl] = useState(null);
   const [error, setError] = useState(null);
 
@@ -135,6 +136,25 @@ function WatershedEditor({ opened, onClose, stackId, layer, imageFilename, onSav
     }
   }
 
+  async function handleAutoDetect() {
+    setError(null);
+    setAutoRunning(true);
+    try {
+      const res = await autoWatershedMasks(stackId, layer.id, { image_filename: imageFilename });
+      const url = res?.masks?.[imageFilename];
+      if (url) {
+        setMaskUrl(url);
+      } else {
+        const reason = res?.skipped?.[imageFilename] || "no flake detected";
+        setError(`Auto-detect failed: ${reason}`);
+      }
+    } catch (e) {
+      setError(e.message || "Auto-detect failed.");
+    } finally {
+      setAutoRunning(false);
+    }
+  }
+
   async function handleDiscard() {
     if (maskUrl) {
       try { await deleteLayerMask(stackId, layer.id, imageFilename); } catch {}
@@ -211,6 +231,17 @@ function WatershedEditor({ opened, onClose, stackId, layer, imageFilename, onSav
 
         <div style={{ flex: "0 0 240px" }}>
           <Stack spacing="sm">
+            <Button
+              size="sm"
+              variant="light"
+              onClick={handleAutoDetect}
+              loading={autoRunning}
+              disabled={!imgLoaded || generating}
+            >Auto-detect flake</Button>
+            <Text size="xs" color="dimmed">
+              Locates the flake from the 20× detection mask. Refine with the brush below if needed.
+            </Text>
+            <Divider label="or paint manually" labelPosition="center" />
             <div>
               <Text size="xs" weight={500} mb={4}>Paint mode</Text>
               <Group spacing={4} grow>

@@ -993,6 +993,120 @@ def create_watershed_mask(stack_id, layer_id):
     return json_response(mask_row.to_dict(), 201)
 
 
+def _save_layer_mask(layer_id, image_filename, mask_png):
+    """Persist a generated mask for (layer, image_filename), replacing any existing
+    one (and unlinking its file), then invalidate caches. Returns the LayerMask."""
+    name = f"{uuid.uuid4().hex}.png"
+    dest = MASKS_DIR / name
+    dest.write_bytes(mask_png)
+    mask_url = f"/uploads/masks/{name}"
+
+    existing = (
+        db_session.query(LayerMask)
+        .filter_by(layer_id=layer_id, image_filename=image_filename)
+        .one_or_none()
+    )
+    if existing is not None:
+        old_path = _mask_url_to_path(existing.mask_url)
+        if old_path is not None and old_path != dest:
+            try:
+                old_path.unlink()
+            except OSError:
+                pass
+        existing.mask_url = mask_url
+        existing.created_at = time.time()
+        mask_row = existing
+    else:
+        mask_row = LayerMask(
+            layer_id=layer_id,
+            image_filename=image_filename,
+            mask_url=mask_url,
+            created_at=time.time(),
+        )
+        db_session.add(mask_row)
+    db_session.commit()
+    _invalidate_user_mask_caches(layer_id, image_filename)
+    return mask_row
+
+
+# Linear micrometres-per-pixel by magnification. Every GMM scalebar is 325 px
+# wide (see 2DMatGMM SCALE_LENGTH), so the ratio between two magnifications gives
+# the exact linear scale of a flake between them.
+_MAG_UM_PER_PX = {
+    "2.5x": 1000.0 / 325, "5x": 500.0 / 325, "20x": 125.0 / 325,
+    "50x": 50.0 / 325, "100x": 25.0 / 325,
+}
+
+
+def _mag_key(image_filename):
+    """'50x.png' -> '50x' when it names a known magnification, else None."""
+    stem = image_filename.rsplit(".", 1)[0].lower()
+    return stem if stem in _MAG_UM_PER_PX else None
+
+
+@app.route("/stacks/<int:stack_id>/layers/<int:layer_id>/auto-watershed", methods=["POST"])
+def auto_watershed_masks(stack_id, layer_id):
+    """Auto-segment the flake in one or more high-mag images using the GMM eval mask.
+
+    The flake of interest is found by matching the shape of the GMM
+    ``flake_mask.png`` against candidate blobs in each target image, so it works
+    even when the flake is off-centre and isn't the largest object in frame.
+
+    Body JSON (all optional):
+      { image_filename: "50x.png",     # limit to one image; else all high-mag images
+        eval_magnification: "20x" }    # magnification of flake_mask.png (default 20x);
+                                       # drives the size prior
+    """
+    from services.watershed import auto_watershed
+
+    layer = db_session.get(StackLayer, layer_id)
+    if layer is None or layer.stack_id != stack_id:
+        return json_response({"error": "layer not found"}, 404)
+    if not layer.flake_path:
+        return json_response({"error": "layer has no flake_path"}, 400)
+
+    body = request.get_json(force=True, silent=True) or {}
+    one = (body.get("image_filename") or "").strip()
+    # GMM detection (and thus flake_mask.png) is always captured at 20x.
+    eval_mag = (body.get("eval_magnification") or "20x").strip().lower() or "20x"
+    targets = [one] if one else ["20x.png", "50x.png", "100x.png"]
+
+    try:
+        eval_mask_bytes = _fetch_base_image(layer.flake_path, "flake_mask.png")
+    except Exception as e:
+        return json_response({"error": f"could not fetch flake_mask.png: {e}"}, 502)
+
+    saved, skipped = {}, {}
+    for fname in targets:
+        try:
+            img_bytes = _fetch_base_image(layer.flake_path, fname)
+        except Exception as e:
+            skipped[fname] = f"image unavailable ({e})"
+            continue
+
+        size_scale = None
+        tgt_mag = _mag_key(fname)
+        if eval_mag in _MAG_UM_PER_PX and tgt_mag:
+            size_scale = _MAG_UM_PER_PX[eval_mag] / _MAG_UM_PER_PX[tgt_mag]
+
+        try:
+            mask_png = auto_watershed(img_bytes, eval_mask_bytes, size_scale=size_scale)
+        except ValueError as e:
+            skipped[fname] = str(e)
+            continue
+        except Exception as e:
+            app.logger.exception("Auto-watershed failed for layer %s/%s", layer_id, fname)
+            skipped[fname] = f"auto-watershed failed: {e}"
+            continue
+
+        row = _save_layer_mask(layer_id, fname, mask_png)
+        saved[fname] = row.mask_url
+
+    if not saved:
+        return json_response({"error": "no masks generated", "skipped": skipped}, 422)
+    return json_response({"masks": saved, "skipped": skipped}, 201)
+
+
 @app.route("/stacks/<int:stack_id>/layers/<int:layer_id>/masks", methods=["GET"])
 def list_layer_masks(stack_id, layer_id):
     layer = db_session.get(StackLayer, layer_id)

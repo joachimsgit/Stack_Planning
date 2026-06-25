@@ -127,9 +127,16 @@ export function fetchAvailableImages(flakePath) {
   return apiFetch(`/proxy/available-images?flake_path=${encodeURIComponent(flakePath)}`);
 }
 
-/** Auto-generate watershed masks for all available high-mag images of a layer. */
-export function autoWatershedMasks(stackId, layerId) {
-  return apiFetch(`/stacks/${stackId}/layers/${layerId}/auto-watershed`, { method: "POST" });
+/**
+ * Auto-generate watershed masks for a layer using the GMM eval mask to locate
+ * the flake. Pass `{ image_filename }` to limit to one image; omit `body` to do
+ * all available high-mag images. Resolves to `{ masks, skipped }`.
+ */
+export function autoWatershedMasks(stackId, layerId, body) {
+  return apiFetch(`/stacks/${stackId}/layers/${layerId}/auto-watershed`, {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
