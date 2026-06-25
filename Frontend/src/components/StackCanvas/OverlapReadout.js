@@ -54,7 +54,7 @@ function OverlapReadout({ layerA, layerB }) {
     // Debounce so a drag/rotate gesture computes once it settles.
     const timer = setTimeout(async () => {
       try {
-        const res = await computeOverlap(a, b, { scale: 2 });
+        const res = await computeOverlap(a, b);
         if (tokenRef.current !== token) return;
         setState(res ? { status: "ready", ...res } : { status: "unavailable" });
       } catch {

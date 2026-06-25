@@ -22,9 +22,6 @@ const HALF = CANVAS_SIZE / 2;
 const REF_CAL = MAGNIFICATION_CALIBRATION[REFERENCE_FILENAME];
 const UM_PER_CANVAS_PX = (REF_CAL.um_per_px * REF_CAL.native_w) / CANONICAL_DISPLAY_WIDTH;
 
-// Alpha above this counts as "flake present" (tolerates anti-aliased edges).
-const ALPHA_THRESHOLD = 16;
-
 function baseFilenameOf(layer) {
   return layer.canvas_base_filename || "raw_img.png";
 }
@@ -90,6 +87,10 @@ async function rasterizeSilhouette(layer, scale) {
   canvas.width = S;
   canvas.height = S;
   const ctx = canvas.getContext("2d");
+  // High-quality smoothing so the resampled alpha conserves the flake's area
+  // (its integral) rather than biasing the edges.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.translate((HALF + (layer.pos_x || 0)) * scale, (HALF + (layer.pos_y || 0)) * scale);
   ctx.rotate(((layer.rotation || 0) * Math.PI) / 180);
   ctx.drawImage(img, (-originX / 100) * W, (-originY / 100) * H, W, H);
@@ -103,7 +104,7 @@ async function rasterizeSilhouette(layer, scale) {
  *   overlapUm2: number, areaAUm2: number, areaBUm2: number, fractionOfSmaller: number
  * }>} null if either silhouette is unavailable.
  */
-export async function computeOverlap(layerA, layerB, { scale = 2 } = {}) {
+export async function computeOverlap(layerA, layerB, { scale = 3 } = {}) {
   if (!layerHasSilhouette(layerA) || !layerHasSilhouette(layerB)) return null;
 
   const [ia, ib] = await Promise.all([
@@ -112,23 +113,28 @@ export async function computeOverlap(layerA, layerB, { scale = 2 } = {}) {
   ]);
   if (!ia || !ib) return null;
 
+  // Treat alpha as fractional pixel coverage (0..1) rather than a hard in/out
+  // threshold: anti-aliased edge pixels then contribute their true partial area,
+  // so the measured silhouette matches the flake's real area even when it spans
+  // only a few hundred pixels. The intersection of two fractional masks is the
+  // per-pixel min of their coverage.
   const a = ia.data;
   const b = ib.data;
-  let countA = 0;
-  let countB = 0;
-  let countBoth = 0;
+  let sumA = 0;
+  let sumB = 0;
+  let sumBoth = 0;
   for (let i = 3; i < a.length; i += 4) {
-    const av = a[i] > ALPHA_THRESHOLD;
-    const bv = b[i] > ALPHA_THRESHOLD;
-    if (av) countA++;
-    if (bv) countB++;
-    if (av && bv) countBoth++;
+    const ca = a[i] / 255;
+    const cb = b[i] / 255;
+    sumA += ca;
+    sumB += cb;
+    sumBoth += ca < cb ? ca : cb;
   }
 
   const pxUm2 = (UM_PER_CANVAS_PX / scale) ** 2;
-  const overlapUm2 = countBoth * pxUm2;
-  const areaAUm2 = countA * pxUm2;
-  const areaBUm2 = countB * pxUm2;
+  const overlapUm2 = sumBoth * pxUm2;
+  const areaAUm2 = sumA * pxUm2;
+  const areaBUm2 = sumB * pxUm2;
   const smaller = Math.min(areaAUm2, areaBUm2);
   return {
     overlapUm2,
