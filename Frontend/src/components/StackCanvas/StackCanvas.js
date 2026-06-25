@@ -6,6 +6,7 @@ import { notifications } from "@mantine/notifications";
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
 import CanvasControls from "./CanvasControls";
+import OverlapReadout from "./OverlapReadout";
 import {
   MAGNIFICATION_CALIBRATION,
   REFERENCE_FILENAME,
@@ -35,6 +36,10 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
   const groupIds = selectedLayerIds || new Set();
   const sorted = [...layers].sort((a, b) => a.layer_index - b.layer_index);
   const activeLayer = sorted.find((l) => l.layer_index === activeLayerIndex) || null;
+
+  // Contact-area readout: shown when exactly two flake layers are selected.
+  const selectedFlakes = sorted.filter((l) => groupIds.has(l.id) && !l.is_shape && !l.is_local);
+  const overlapPair = selectedFlakes.length === 2 ? selectedFlakes : null;
 
   const [layerDisplayModes, setLayerDisplayModes] = useState({});
   const [zoom, setZoom] = useState(1);
@@ -607,6 +612,12 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
         {/* Wrapper: stable 700×700 layout footprint, not scaled.
             Scale bar is positioned here so it's always visible. */}
         <div style={{ position: "relative", width: CANVAS_SIZE, height: CANVAS_SIZE, flexShrink: 0 }}>
+
+          {/* Contact-area readout (two flakes selected) — outside the scaled
+              container so it stays a fixed size in the corner. */}
+          {overlapPair && (
+            <OverlapReadout layerA={overlapPair[0]} layerB={overlapPair[1]} />
+          )}
 
           {/* Scaled + panned container */}
           <div
