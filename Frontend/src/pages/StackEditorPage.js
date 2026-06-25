@@ -9,13 +9,22 @@ import {
   TextInput,
   ActionIcon,
   Button,
+  Tooltip,
 } from "@mantine/core";
-import { IconPencil, IconCheck, IconX, IconUpload } from "@tabler/icons-react";
+import {
+  IconPencil,
+  IconCheck,
+  IconX,
+  IconUpload,
+  IconArrowBackUp,
+  IconArrowForwardUp,
+} from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import AppHeader from "../components/AppHeader/AppHeader";
 import StackComposer from "../components/StackComposer/StackComposer";
 import StackCanvas from "../components/StackCanvas/StackCanvas";
 import FlakePicker from "../components/FlakePicker/FlakePicker";
+import { useStackHistory } from "../utils/useStackHistory";
 import {
   fetchStack,
   addLayer,
@@ -27,6 +36,85 @@ import {
   fetchLayerMasks,
   fetchFlakeById,
 } from "../utils/api";
+
+// Tracked fields the backend's PUT /layers/<id> can update (excluding
+// layer_index, which is handled by the dedicated reorder endpoint).
+const UPDATABLE_FIELDS = [
+  "pos_x",
+  "pos_y",
+  "rotation",
+  "opacity",
+  "brightness",
+  "contrast",
+  "shape_color",
+  "shape_stroke_width",
+  "canvas_base_filename",
+  "name",
+];
+
+function remapSet(set, oldId, newId) {
+  if (!set.has(oldId)) return set;
+  const next = new Set(set);
+  next.delete(oldId);
+  next.add(newId);
+  return next;
+}
+
+// Build a POST /layers payload that recreates a layer from a history snapshot.
+function buildAddPayload(l) {
+  const common = {
+    layer_index: l.layer_index,
+    pos_x: l.pos_x ?? 0,
+    pos_y: l.pos_y ?? 0,
+    rotation: l.rotation ?? 0,
+    opacity: l.opacity ?? 1,
+    name: l.name ?? null,
+  };
+  if (l.is_shape) {
+    return {
+      ...common,
+      is_shape: true,
+      shape_type: l.shape_type,
+      shape_data: l.shape_data,
+      shape_color: l.shape_color,
+      shape_stroke_width: l.shape_stroke_width,
+    };
+  }
+  if (l.is_local) {
+    return {
+      ...common,
+      is_local: true,
+      local_image_url: l.local_image_url,
+      flake_material: l.flake_material,
+      brightness: l.brightness ?? 1,
+      contrast: l.contrast ?? 1,
+    };
+  }
+  return {
+    ...common,
+    flake_id: l.flake_id,
+    flake_material: l.flake_material,
+    flake_size: l.flake_size,
+    flake_thickness: l.flake_thickness,
+    flake_path: l.flake_path,
+    image_filename: l.image_filename,
+    canvas_base_filename: l.canvas_base_filename,
+    brightness: l.brightness ?? 1,
+    contrast: l.contrast ?? 1,
+  };
+}
+
+// Fields of `target` that differ from the live layer and need a backend update.
+function transformDiff(live, target) {
+  const diff = {};
+  for (const f of UPDATABLE_FIELDS) {
+    if ((target[f] ?? null) !== (live[f] ?? null)) diff[f] = target[f];
+  }
+  if (JSON.stringify(target.shape_data ?? null) !== JSON.stringify(live.shape_data ?? null)) {
+    diff.shape_data = target.shape_data ?? null;
+  }
+  return diff;
+}
 
 // Debounce helper — returns a function that delays calling fn by `delay` ms
 function useDebounce(fn, delay) {
@@ -61,6 +149,152 @@ function StackEditorPage() {
   useEffect(() => { layersRef.current = layers; }, [layers]);
   const selectedLayerIdsRef = useRef(selectedLayerIds);
   useEffect(() => { selectedLayerIdsRef.current = selectedLayerIds; }, [selectedLayerIds]);
+
+  // -----------------------------------------------------------------------
+  // Undo / redo history
+  // -----------------------------------------------------------------------
+  const history = useStackHistory(useCallback(() => layersRef.current, []));
+  const {
+    reset: resetHistory,
+    record: recordHistory,
+    recordSoon: recordHistorySoon,
+    remapId: remapHistoryId,
+    undo: undoHistory,
+    redo: redoHistory,
+    canUndo,
+    canRedo,
+  } = history;
+
+  // Reconcile the backend + local state to a restored snapshot. Diffs the
+  // current layers against `target`: deletes layers that were re-added, recreates
+  // layers that were deleted (remapping their new backend id through the
+  // timeline), updates changed transforms, and reorders. Backend failures are
+  // non-fatal, mirroring the app's optimistic-write pattern elsewhere.
+  const applySnapshot = useCallback(
+    async (target) => {
+      const cur = layersRef.current;
+      const curById = new Map(cur.map((l) => [l.id, l]));
+      const tgtIds = new Set(target.map((l) => l.id));
+
+      // Carry over live masks so watershed edits survive an undo/redo.
+      const resolved = target.map((l) => {
+        const live = curById.get(l.id);
+        return { ...l, masks: live ? live.masks : l.masks || {} };
+      });
+
+      // Optimistic local state first for instant feedback.
+      setLayers(resolved);
+      setSelectedLayerIds((prev) => new Set([...prev].filter((x) => tgtIds.has(x))));
+      setHiddenLayers((prev) => new Set([...prev].filter((x) => tgtIds.has(x))));
+      setActiveLayerIndex((prev) =>
+        resolved.some((l) => l.layer_index === prev)
+          ? prev
+          : resolved.length
+          ? resolved[0].layer_index
+          : null
+      );
+
+      // 1) Delete layers present now but absent in the target.
+      for (const l of cur) {
+        if (!tgtIds.has(l.id) && typeof l.id === "number") {
+          try {
+            await deleteLayer(id, l.id);
+          } catch {
+            /* non-fatal */
+          }
+        }
+      }
+
+      // 2) Recreate layers present in the target but not currently — they were
+      //    deleted earlier and are coming back with a fresh backend id.
+      for (const l of resolved) {
+        if (curById.has(l.id)) continue;
+        try {
+          const saved = await addLayer(id, buildAddPayload(l));
+          if (saved && saved.id != null && saved.id !== l.id) {
+            const oldId = l.id;
+            const newId = saved.id;
+            remapHistoryId(oldId, newId);
+            l.id = newId;
+            setLayers((prev) => prev.map((x) => (x.id === oldId ? { ...x, id: newId } : x)));
+            setHiddenLayers((prev) => remapSet(prev, oldId, newId));
+            setSelectedLayerIds((prev) => remapSet(prev, oldId, newId));
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
+
+      // 3) Update survivors whose transform fields changed.
+      for (const l of resolved) {
+        const live = curById.get(l.id); // recreated layers have a new id → skipped
+        if (!live || typeof l.id !== "number") continue;
+        const diff = transformDiff(live, l);
+        if (Object.keys(diff).length) {
+          try {
+            await updateLayer(id, l.id, diff);
+          } catch {
+            /* non-fatal */
+          }
+        }
+      }
+
+      // 4) Reassert layer order.
+      const order = resolved
+        .filter((l) => typeof l.id === "number")
+        .map((l) => ({ id: l.id, layer_index: l.layer_index }));
+      if (order.length) {
+        try {
+          await reorderLayers(id, order);
+        } catch {
+          /* non-fatal */
+        }
+      }
+    },
+    [id, remapHistoryId]
+  );
+
+  // Serialize snapshot applications so rapid undo/redo can't interleave backend
+  // calls out of order.
+  const applyChainRef = useRef(Promise.resolve());
+  const enqueueApply = useCallback(
+    (target) => {
+      applyChainRef.current = applyChainRef.current
+        .then(() => applySnapshot(target))
+        .catch(() => {});
+      return applyChainRef.current;
+    },
+    [applySnapshot]
+  );
+
+  const handleUndo = useCallback(() => {
+    const target = undoHistory();
+    if (target) enqueueApply(target);
+  }, [undoHistory, enqueueApply]);
+
+  const handleRedo = useCallback(() => {
+    const target = redoHistory();
+    if (target) enqueueApply(target);
+  }, [redoHistory, enqueueApply]);
+
+  // Keyboard shortcuts: Ctrl/Cmd+Z undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redo.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleUndo, handleRedo]);
 
   const handleToggleLayerVisibility = useCallback((layerId) => {
     setHiddenLayers((prev) => {
@@ -109,7 +343,8 @@ function StackEditorPage() {
       if (typeof id !== "number") return;
       debouncedPersistRef.current?.(id, data);
     });
-  }, []);
+    recordHistorySoon();
+  }, [recordHistorySoon]);
   const debouncedPersistRef = useRef(null);
 
   // Inline stack name editing
@@ -125,7 +360,8 @@ function StackEditorPage() {
 
   const handleAddShape = async (shape) => {
     // Optimistically add to state so the shape appears immediately
-    setLayers((prev) => [...prev, shape]);
+    const optimistic = [...layersRef.current, shape];
+    setLayers(optimistic);
     setActiveLayerIndex(shape.layer_index);
 
     try {
@@ -142,9 +378,9 @@ function StackEditorPage() {
         opacity: shape.opacity,
       });
       // Replace the temporary id with the real database id
-      setLayers((prev) =>
-        prev.map((l) => (l.id === shape.id ? { ...saved, is_shape: true } : l))
-      );
+      const next = optimistic.map((l) => (l.id === shape.id ? { ...saved, is_shape: true } : l));
+      setLayers(next);
+      recordHistory(next);
     } catch (err) {
       notifications.show({ color: "red", title: "Save failed", message: "Shape could not be saved to the database." });
     }
@@ -165,8 +401,10 @@ function StackEditorPage() {
         layer_index: nextIndex,
         opacity: 1,
       });
-      setLayers((prev) => [...prev, newLayer]);
+      const next = [...layersRef.current, newLayer];
+      setLayers(next);
       setActiveLayerIndex(newLayer.layer_index);
+      recordHistory(next);
     } catch (err) {
       notifications.show({ color: "red", title: "Import failed", message: err.message || "Could not save image" });
     }
@@ -181,6 +419,7 @@ function StackEditorPage() {
       .then((data) => {
         setStack({ id: data.id, name: data.name, notes: data.notes, username: data.username });
         setLayers(data.layers || []);
+        resetHistory(data.layers || []);
         setNameInput(data.name);
         if (data.layers && data.layers.length > 0) {
           setActiveLayerIndex(data.layers[0].layer_index);
@@ -207,8 +446,10 @@ function StackEditorPage() {
         flake_thickness: flake.flake_thickness,
         flake_path: flake.flake_path,
       });
-      setLayers((prev) => [...prev, newLayer]);
+      const next = [...layersRef.current, newLayer];
+      setLayers(next);
       setActiveLayerIndex(newLayer.layer_index);
+      recordHistory(next);
     } catch (err) {
       notifications.show({ color: "red", message: `Failed to add layer: ${err.message}` });
     }
@@ -252,8 +493,9 @@ function StackEditorPage() {
         prev.map((l) => (l.id === layerId ? { ...l, ...data } : l))
       );
       debouncedPersist(layerId, data);
+      recordHistorySoon();
     },
-    [debouncedPersist]
+    [debouncedPersist, recordHistorySoon]
   );
 
   const handleDeleteLayer = async (layerId) => {
@@ -287,6 +529,8 @@ function StackEditorPage() {
     if (remoteOrder.length > 0) {
       reorderLayers(id, remoteOrder).catch(() => {});
     }
+
+    recordHistory(remaining);
   };
 
   // Called after WatershedEditor save / discard. Refetch the layer's masks
@@ -309,12 +553,12 @@ function StackEditorPage() {
 
   const handleReorderLayers = async (newOrder) => {
     // Optimistic update for all layers (local + remote)
-    setLayers((prev) =>
-      prev.map((l) => {
-        const entry = newOrder.find((o) => o.id === l.id);
-        return entry ? { ...l, layer_index: entry.layer_index } : l;
-      })
-    );
+    const next = layersRef.current.map((l) => {
+      const entry = newOrder.find((o) => o.id === l.id);
+      return entry ? { ...l, layer_index: entry.layer_index } : l;
+    });
+    setLayers(next);
+    recordHistory(next);
     const remoteOrder = newOrder.filter((o) => typeof o.id === "number");
     if (remoteOrder.length === 0) return;
     try {
@@ -367,6 +611,28 @@ function StackEditorPage() {
 
   const headerRight = (
     <Group spacing={8}>
+      <Group spacing={2}>
+        <Tooltip label="Undo (Ctrl+Z)" withArrow>
+          <ActionIcon
+            size="sm"
+            variant="default"
+            onClick={handleUndo}
+            disabled={!canUndo}
+          >
+            <IconArrowBackUp size={16} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Redo (Ctrl+Y)" withArrow>
+          <ActionIcon
+            size="sm"
+            variant="default"
+            onClick={handleRedo}
+            disabled={!canRedo}
+          >
+            <IconArrowForwardUp size={16} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
       {editingName ? (
         <Group spacing={4}>
           <TextInput

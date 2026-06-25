@@ -437,21 +437,21 @@ export async function exportStackReport(opts) {
   const meta = opts.stackMeta || {};
   const sorted = [...(opts.layers || [])].sort((a, b) => a.layer_index - b.layer_index);
 
-  // Twist angle: rotation difference relative to the previous crystalline
-  // (flake) layer below it in the stack.
-  let prevFlakeRot = null;
+  // Twist angle (commented out per request): rotation difference relative to
+  // the previous crystalline (flake) layer below it in the stack.
+  // let prevFlakeRot = null;
   const rows = sorted.map((l) => {
     const { type, detail } = describeLayer(l);
-    let twist = "";
-    if (!l.is_shape && !l.is_local) {
-      if (prevFlakeRot !== null) {
-        let d = (l.rotation || 0) - prevFlakeRot;
-        d = ((d % 360) + 360) % 360;
-        if (d > 180) d -= 360;
-        twist = `${d.toFixed(1)}°`;
-      }
-      prevFlakeRot = l.rotation || 0;
-    }
+    // let twist = "";
+    // if (!l.is_shape && !l.is_local) {
+    //   if (prevFlakeRot !== null) {
+    //     let d = (l.rotation || 0) - prevFlakeRot;
+    //     d = ((d % 360) + 360) % 360;
+    //     if (d > 180) d -= 360;
+    //     twist = `${d.toFixed(1)}°`;
+    //   }
+    //   prevFlakeRot = l.rotation || 0;
+    // }
     const num = (v, suffix = "") => (v == null || v === "" ? "—" : `${typeof v === "number" ? v.toFixed(1) : v}${suffix}`);
     return `
       <tr>
@@ -461,7 +461,6 @@ export async function exportStackReport(opts) {
         <td>${l.flake_size != null ? l.flake_size.toFixed(0) + " µm²" : "—"}</td>
         <td>${num(l.pos_x)}, ${num(l.pos_y)}</td>
         <td>${num(l.rotation, "°")}</td>
-        <td>${twist || "—"}</td>
       </tr>`;
   }).join("");
 
@@ -493,7 +492,7 @@ export async function exportStackReport(opts) {
   <table>
     <thead><tr>
       <th>#</th><th>Layer</th><th>Thickness</th><th>Size</th>
-      <th>Position (x, y)</th><th>Rotation</th><th>Twist</th>
+      <th>Position (x, y)</th><th>Rotation</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>
