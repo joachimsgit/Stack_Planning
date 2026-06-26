@@ -33,7 +33,7 @@ const UM_PER_CANVAS_PX = (REF_CAL.um_per_px * REF_CAL.native_w) / CANONICAL_DISP
 // Nice round values used to auto-select scale bar label
 const NICE_UM = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 
-function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onUpdateLayer, onUpdateManyLayers, onAddShape, hiddenLayers, stackMeta }) {
+function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer, onUpdateLayer, onUpdateManyLayers, onDeleteLayers, onAddShape, hiddenLayers, stackMeta }) {
   const groupIds = selectedLayerIds || new Set();
   const sorted = [...layers].sort((a, b) => a.layer_index - b.layer_index);
   const activeLayer = sorted.find((l) => l.layer_index === activeLayerIndex) || null;
@@ -119,6 +119,33 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
       document.removeEventListener("keyup",   onKeyUp);
     };
   }, []);
+
+  // Delete: remove the current selection. Escape: cancel an active drawing /
+  // measure tool, otherwise clear the selection. Skipped while a text field has
+  // focus so typing (flake ID, stack name, the text-tool box) isn't hijacked.
+  useEffect(() => {
+    const isInput = () => {
+      const t = document.activeElement?.tagName;
+      return t === "INPUT" || t === "TEXTAREA" || t === "SELECT";
+    };
+    const onKey = (e) => {
+      if (isInput()) return;
+      if (e.key === "Delete") {
+        const ids = [...groupIdsRef.current];
+        if (ids.length === 0) return;
+        e.preventDefault();
+        onDeleteLayers(ids);
+      } else if (e.key === "Escape") {
+        if (activeToolRef.current) {
+          setActiveTool(null); // tool-specific Esc handlers clear their own state
+        } else if (groupIdsRef.current.size > 0) {
+          onSelectLayer(null);
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onDeleteLayers, onSelectLayer]);
 
   // Scroll wheel controls
   useEffect(() => {
@@ -823,19 +850,21 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
                   {activeTool === "measure" && toolPoints.length === 1 && toolHover && (() => {
                     const A = toolPoints[0];
                     const d = distUm(A.x, A.y, toolHover.x, toolHover.y);
+                    // Divide visual sizes by zoom so the overlay stays a constant
+                    // on-screen size inside the scaled canvas container.
                     return (
                       <>
                         <line x1={A.x} y1={A.y} x2={toolHover.x} y2={toolHover.y}
-                          stroke="white" strokeWidth={3} opacity={0.6} />
+                          stroke="white" strokeWidth={3 / zoom} opacity={0.6} />
                         <line x1={A.x} y1={A.y} x2={toolHover.x} y2={toolHover.y}
-                          stroke={drawColor} strokeWidth={1.5} strokeDasharray="5 3" />
-                        <text x={toolHover.x + 10} y={toolHover.y - 8}
-                          fontSize={12} fontFamily="sans-serif" fontWeight="600"
-                          stroke="white" strokeWidth={3} paintOrder="stroke" fill="white">
+                          stroke={drawColor} strokeWidth={1.5 / zoom} strokeDasharray={`${5 / zoom} ${3 / zoom}`} />
+                        <text x={toolHover.x + 10 / zoom} y={toolHover.y - 8 / zoom}
+                          fontSize={12 / zoom} fontFamily="sans-serif" fontWeight="600"
+                          stroke="white" strokeWidth={3 / zoom} paintOrder="stroke" fill="white">
                           {d.toFixed(2)} µm
                         </text>
-                        <text x={toolHover.x + 10} y={toolHover.y - 8}
-                          fontSize={12} fontFamily="sans-serif" fontWeight="600" fill={drawColor}>
+                        <text x={toolHover.x + 10 / zoom} y={toolHover.y - 8 / zoom}
+                          fontSize={12 / zoom} fontFamily="sans-serif" fontWeight="600" fill={drawColor}>
                           {d.toFixed(2)} µm
                         </text>
                       </>
@@ -844,16 +873,18 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
 
                   {/* PROTRACTOR live preview */}
                   {activeTool === "protractor" && toolPoints.length >= 1 && (() => {
+                    // Divide visual sizes by zoom so the overlay stays a constant
+                    // on-screen size inside the scaled canvas container.
                     const segs = [];
                     for (let i = 0; i < toolPoints.length - 1; i++) {
                       segs.push(
                         <g key={`s${i}`}>
                           <line x1={toolPoints[i].x} y1={toolPoints[i].y}
                             x2={toolPoints[i + 1].x} y2={toolPoints[i + 1].y}
-                            stroke="white" strokeWidth={3} />
+                            stroke="white" strokeWidth={3 / zoom} />
                           <line x1={toolPoints[i].x} y1={toolPoints[i].y}
                             x2={toolPoints[i + 1].x} y2={toolPoints[i + 1].y}
-                            stroke={drawColor} strokeWidth={1.5} />
+                            stroke={drawColor} strokeWidth={1.5 / zoom} />
                         </g>
                       );
                     }
@@ -861,7 +892,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
                     if (toolHover && toolPoints.length < 3) {
                       segs.push(
                         <line key="live" x1={last.x} y1={last.y} x2={toolHover.x} y2={toolHover.y}
-                          stroke={drawColor} strokeWidth={1.5} strokeDasharray="5 3" opacity={0.7} />
+                          stroke={drawColor} strokeWidth={1.5 / zoom} strokeDasharray={`${5 / zoom} ${3 / zoom}`} opacity={0.7} />
                       );
                     }
                     if (toolPoints.length === 2 && toolHover) {
@@ -869,13 +900,13 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
                       return (
                         <>
                           {segs}
-                          <text x={toolPoints[1].x + 10} y={toolPoints[1].y - 10}
-                            fontSize={13} fontFamily="sans-serif" fontWeight="700"
-                            stroke="white" strokeWidth={4} paintOrder="stroke" fill="white">
+                          <text x={toolPoints[1].x + 10 / zoom} y={toolPoints[1].y - 10 / zoom}
+                            fontSize={13 / zoom} fontFamily="sans-serif" fontWeight="700"
+                            stroke="white" strokeWidth={4 / zoom} paintOrder="stroke" fill="white">
                             {ang.toFixed(1)}°
                           </text>
-                          <text x={toolPoints[1].x + 10} y={toolPoints[1].y - 10}
-                            fontSize={13} fontFamily="sans-serif" fontWeight="700" fill={drawColor}>
+                          <text x={toolPoints[1].x + 10 / zoom} y={toolPoints[1].y - 10 / zoom}
+                            fontSize={13 / zoom} fontFamily="sans-serif" fontWeight="700" fill={drawColor}>
                             {ang.toFixed(1)}°
                           </text>
                         </>

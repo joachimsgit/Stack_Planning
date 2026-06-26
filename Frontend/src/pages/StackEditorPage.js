@@ -533,6 +533,45 @@ function StackEditorPage() {
     recordHistory(remaining);
   };
 
+  // Delete every layer in `ids` at once (used by the canvas Delete-key handler,
+  // which can target a multi-selection). Mirrors handleDeleteLayer's reindex +
+  // reorder, but batched so a single history step covers the whole removal.
+  const handleDeleteLayers = useCallback(
+    async (ids) => {
+      const idSet = new Set(ids);
+      if (idSet.size === 0) return;
+
+      for (const lid of idSet) {
+        if (typeof lid === "number") {
+          try {
+            await deleteLayer(id, lid);
+          } catch (err) {
+            notifications.show({ color: "red", message: `Failed to delete layer: ${err.message}` });
+          }
+        }
+      }
+
+      const remaining = layersRef.current
+        .filter((l) => !idSet.has(l.id))
+        .sort((a, b) => a.layer_index - b.layer_index)
+        .map((l, i) => ({ ...l, layer_index: i }));
+
+      setLayers(remaining);
+      setSelectedLayerIds(new Set());
+      setActiveLayerIndex(remaining.length === 0 ? null : remaining[0].layer_index);
+
+      const remoteOrder = remaining
+        .filter((l) => typeof l.id === "number")
+        .map((l) => ({ id: l.id, layer_index: l.layer_index }));
+      if (remoteOrder.length > 0) {
+        reorderLayers(id, remoteOrder).catch(() => {});
+      }
+
+      recordHistory(remaining);
+    },
+    [id, recordHistory]
+  );
+
   // Called after WatershedEditor save / discard. Refetch the layer's masks
   // from the backend and merge them into state so `layer.masks` is current on
   // the canvas and in the FlakeInfo modal.
@@ -743,6 +782,7 @@ function StackEditorPage() {
             onSelectLayer={handleSelectLayer}
             onUpdateLayer={handleUpdateLayer}
             onUpdateManyLayers={handleUpdateManyLayers}
+            onDeleteLayers={handleDeleteLayers}
             onAddShape={handleAddShape}
             hiddenLayers={hiddenLayers}
             stackMeta={stack}
