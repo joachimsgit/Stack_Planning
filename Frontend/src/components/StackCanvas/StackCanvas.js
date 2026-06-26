@@ -120,7 +120,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     };
   }, []);
 
-  // Delete: remove the current selection. Escape: cancel an active drawing /
+  // Backspace: remove the current selection. Escape: cancel an active drawing /
   // measure tool, otherwise clear the selection. Skipped while a text field has
   // focus so typing (flake ID, stack name, the text-tool box) isn't hijacked.
   useEffect(() => {
@@ -130,15 +130,22 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     };
     const onKey = (e) => {
       if (isInput()) return;
-      if (e.key === "Delete") {
-        const ids = [...groupIdsRef.current];
+      if (e.key === "Backspace") {
+        if (activeToolRef.current) return; // don't delete layers while a tool is active
+        // Prefer the multi-selection; fall back to the single active layer, which
+        // can be highlighted without being in selectedLayerIds (e.g. right after
+        // adding a flake/shape, or the auto-selected layer on initial load).
+        const gIds = groupIdsRef.current;
+        const ids = gIds.size > 0
+          ? [...gIds]
+          : (activeLayerRef.current ? [activeLayerRef.current.id] : []);
         if (ids.length === 0) return;
         e.preventDefault();
         onDeleteLayers(ids);
       } else if (e.key === "Escape") {
         if (activeToolRef.current) {
           setActiveTool(null); // tool-specific Esc handlers clear their own state
-        } else if (groupIdsRef.current.size > 0) {
+        } else if (groupIdsRef.current.size > 0 || activeLayerRef.current) {
           onSelectLayer(null);
         }
       }
@@ -530,6 +537,28 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     });
   };
 
+  // Global view toggle: flip every flake layer to outline-only (outline on,
+  // flake off) in one click, or restore the filled-flake default. Shapes and
+  // imported images are left untouched.
+  const flakeLayers = sorted.filter((l) => !l.is_shape && !l.is_local);
+  const allOutlineOnly =
+    flakeLayers.length > 0 &&
+    flakeLayers.every((l) => {
+      const m = getDisplayModes(l.id);
+      return m.outline && !m.flake;
+    });
+  const toggleAllOutlineOnly = () => {
+    const turnOn = !allOutlineOnly;
+    setLayerDisplayModes((prev) => {
+      const next = { ...prev };
+      flakeLayers.forEach((l) => {
+        const cur = { ...DEFAULT_DISPLAY_MODES, ...(prev[l.id] || {}) };
+        next[l.id] = { ...cur, flake: !turnOn, outline: turnOn };
+      });
+      return next;
+    });
+  };
+
   const handleUpdateTransform = (data) => {
     if (!activeLayer) return;
     if ("rotation" in data && groupIds.size > 1 && groupIds.has(activeLayer.id)) {
@@ -683,6 +712,19 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
               onClick={() => toggleTool("protractor")}
             >
               <IconAngle size={14} />
+            </ActionIcon>
+          </Tooltip>
+
+          <Divider orientation="vertical" />
+
+          <Tooltip label={allOutlineOnly ? "Show filled flakes" : "Outlines only (all flakes)"} withArrow>
+            <ActionIcon
+              size="sm"
+              variant={allOutlineOnly ? "filled" : "default"}
+              onClick={toggleAllOutlineOnly}
+              disabled={flakeLayers.length === 0}
+            >
+              <IconShape size={14} />
             </ActionIcon>
           </Tooltip>
 

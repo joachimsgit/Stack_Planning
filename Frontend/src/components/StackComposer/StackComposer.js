@@ -10,7 +10,7 @@ import {
   IconEye,
   IconEyeOff,
 } from "@tabler/icons-react";
-import { flakeImageUrl, fetchFlakeNotes, resolveLocalImageUrl } from "../../utils/api";
+import { flakeCropUrl, fetchFlakeNotes, resolveLocalImageUrl } from "../../utils/api";
 import FlakeInfoModal from "./FlakeInfoModal";
 
 const MATERIAL_COLORS = {
@@ -54,9 +54,11 @@ function LayerRow({ layer, isActive, isSelected, onSelect, onDelete, onMoveUp, o
   }[layer.shape_type] || "orange";
   const badgeColor = isShape ? shapeBadgeColor : (MATERIAL_COLORS[material] || "violet");
 
+  // Prefer a tightly-cropped, background-transparent render of just the flake
+  // over the full eval image so the thumbnail shows the flake at a useful size.
   const imgUrl = isShape
     ? null
-    : (resolveLocalImageUrl(layer.local_image_url) || flakeImageUrl(layer.flake_path, "eval_img.jpg"));
+    : (resolveLocalImageUrl(layer.local_image_url) || flakeCropUrl(layer.flake_path));
 
   const subtext = isShape
     ? null
