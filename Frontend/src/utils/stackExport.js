@@ -354,6 +354,7 @@ export async function renderStackToCanvas({
   scale = 2,
   background = "#ffffff",
   showScaleBar = true,
+  includeShapes = true,
 } = {}) {
   const S = CANVAS_SIZE * scale;
   const canvas = document.createElement("canvas");
@@ -373,6 +374,7 @@ export async function renderStackToCanvas({
   for (const layer of sorted) {
     if (hidden.has(layer.id)) continue;
     if (layer.is_shape) {
+      if (!includeShapes) continue;
       drawShapeLayer(ctx, layer, scale);
     } else {
       // `isBottom` (normal blend vs multiply) tracks the first visible image layer.
@@ -415,6 +417,27 @@ export async function exportStackPng(opts) {
   const blob = await canvasToBlob(canvas, "image/png");
   const ts = new Date().toISOString().slice(0, 10);
   triggerDownload(blob, `${safeFilename(opts.stackMeta?.name)}_${ts}.png`);
+}
+
+// ---------------------------------------------------------------------------
+// Public: transparent outline-only PNG.
+// Renders just the flake outlines (no base image, no fill, no shapes/annotations)
+// onto a transparent background. Intended as an overlay/reference for the
+// stacking microscope — only flakes with a mask (GMM remote or user-painted)
+// contribute an outline; the geometry matches the on-screen canvas exactly.
+// ---------------------------------------------------------------------------
+
+export async function exportStackOutlines(opts) {
+  const canvas = await renderStackToCanvas({
+    ...opts,
+    background: null,
+    showScaleBar: false,
+    includeShapes: false,
+    getDisplayModes: () => ({ background: false, flake: false, outline: true }),
+  });
+  const blob = await canvasToBlob(canvas, "image/png");
+  const ts = new Date().toISOString().slice(0, 10);
+  triggerDownload(blob, `${safeFilename(opts.stackMeta?.name)}_outlines_${ts}.png`);
 }
 
 // ---------------------------------------------------------------------------

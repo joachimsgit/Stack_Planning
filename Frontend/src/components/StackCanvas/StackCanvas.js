@@ -1,7 +1,7 @@
 import "./StackCanvas.css";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Text, Slider, Group, ActionIcon, Divider, Tooltip, Menu } from "@mantine/core";
-import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconTextSize, IconRuler2, IconAngle, IconPolygon, IconDownload, IconPhoto, IconFileText } from "@tabler/icons-react";
+import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconTextSize, IconRuler2, IconAngle, IconPolygon, IconDownload, IconPhoto, IconFileText, IconShape } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
@@ -12,7 +12,7 @@ import {
   REFERENCE_FILENAME,
   CANONICAL_DISPLAY_WIDTH,
 } from "../../utils/calibration";
-import { exportStackPng, exportStackReport } from "../../utils/stackExport";
+import { exportStackPng, exportStackReport, exportStackOutlines } from "../../utils/stackExport";
 import { warmFlakePicker, pickFlakeAt } from "../../utils/flakePick";
 
 const CANVAS_SIZE = 700;
@@ -553,6 +553,7 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
         stackMeta,
       };
       if (kind === "png") await exportStackPng(opts);
+      else if (kind === "outlines") await exportStackOutlines(opts);
       else await exportStackReport(opts);
     } catch (err) {
       notifications.show({ color: "red", title: "Export failed", message: err.message || String(err) });
@@ -672,6 +673,9 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
               <Menu.Label>Export</Menu.Label>
               <Menu.Item icon={<IconPhoto size={14} />} onClick={() => runExport("png")}>
                 Image (PNG)
+              </Menu.Item>
+              <Menu.Item icon={<IconShape size={14} />} onClick={() => runExport("outlines")}>
+                Flake outlines (transparent PNG)
               </Menu.Item>
               <Menu.Item icon={<IconFileText size={14} />} onClick={() => runExport("report")}>
                 Stack report (PDF)
