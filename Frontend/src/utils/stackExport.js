@@ -23,6 +23,7 @@ import {
   fetchFlakeCentroid,
   resolveLocalImageUrl,
 } from "./api";
+import { buildZip } from "./zip";
 
 const CANVAS_SIZE = 700;
 const HALF = CANVAS_SIZE / 2;
@@ -438,6 +439,61 @@ export async function exportStackOutlines(opts) {
   const blob = await canvasToBlob(canvas, "image/png");
   const ts = new Date().toISOString().slice(0, 10);
   triggerDownload(blob, `${safeFilename(opts.stackMeta?.name)}_outlines_${ts}.png`);
+}
+
+// ---------------------------------------------------------------------------
+// Public: one transparent PNG per flake, bundled in a ZIP.
+// Every (non-shape, non-hidden) layer is rendered alone on the *full shared
+// canvas frame* in its composed position, background transparent. Overlaying
+// all the PNGs reproduces the stack, but each can be positioned independently
+// in the camera/stacking software. Each flake keeps its current on-canvas
+// display mode (e.g. masked silhouette), so a flake with no mask exports empty.
+// ---------------------------------------------------------------------------
+
+function flakeFileName(layer, used) {
+  const idx = String(layer.layer_index ?? 0).padStart(2, "0");
+  const base = layer.is_local
+    ? "image"
+    : `${layer.flake_material || "flake"}${layer.flake_id ? `_${layer.flake_id}` : ""}`;
+  const stem = safeFilename(`${idx}_${base}`);
+  let name = stem;
+  let k = 2;
+  while (used.has(name)) name = `${stem}_${k++}`;
+  used.add(name);
+  return `${name}.png`;
+}
+
+export async function exportStackFlakes(opts) {
+  const hidden = opts.hiddenLayers || new Set();
+  const flakeLayers = [...(opts.layers || [])]
+    .filter((l) => !l.is_shape && !hidden.has(l.id))
+    .sort((a, b) => a.layer_index - b.layer_index);
+  if (!flakeLayers.length) throw new Error("No flake layers to export.");
+
+  const entries = [];
+  const used = new Set();
+  for (const layer of flakeLayers) {
+    // Render this flake alone on the full transparent canvas, reusing the exact
+    // composed geometry (position/rotation/scale) from the shared renderer.
+    // eslint-disable-next-line no-await-in-loop
+    const canvas = await renderStackToCanvas({
+      ...opts,
+      layers: [layer],
+      hiddenLayers: new Set(),
+      background: null,
+      showScaleBar: false,
+      includeShapes: false,
+    });
+    // eslint-disable-next-line no-await-in-loop
+    const blob = await canvasToBlob(canvas, "image/png");
+    // eslint-disable-next-line no-await-in-loop
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    entries.push({ name: flakeFileName(layer, used), data: buf });
+  }
+
+  const zip = buildZip(entries);
+  const ts = new Date().toISOString().slice(0, 10);
+  triggerDownload(zip, `${safeFilename(opts.stackMeta?.name)}_flakes_${ts}.zip`);
 }
 
 // ---------------------------------------------------------------------------

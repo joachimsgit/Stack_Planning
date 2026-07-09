@@ -1,7 +1,7 @@
 import "./StackCanvas.css";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Text, Slider, Group, ActionIcon, Divider, Tooltip, Menu } from "@mantine/core";
-import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconTextSize, IconRuler2, IconAngle, IconPolygon, IconDownload, IconPhoto, IconFileText, IconShape } from "@tabler/icons-react";
+import { IconLayersIntersect, IconLine, IconRectangle, IconPencil, IconTextSize, IconRuler2, IconAngle, IconPolygon, IconDownload, IconPhoto, IconFileText, IconShape, IconFiles } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import LayerImage from "./LayerImage";
 import ShapeLayer from "./ShapeLayer";
@@ -12,7 +12,8 @@ import {
   REFERENCE_FILENAME,
   CANONICAL_DISPLAY_WIDTH,
 } from "../../utils/calibration";
-import { exportStackPng, exportStackReport, exportStackOutlines } from "../../utils/stackExport";
+import { exportStackPng, exportStackReport, exportStackOutlines, exportStackFlakes } from "../../utils/stackExport";
+import { exportStackRois } from "../../utils/roiExport";
 import { warmFlakePicker, pickFlakeAt } from "../../utils/flakePick";
 
 const CANVAS_SIZE = 700;
@@ -610,6 +611,8 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
       };
       if (kind === "png") await exportStackPng(opts);
       else if (kind === "outlines") await exportStackOutlines(opts);
+      else if (kind === "flakes") await exportStackFlakes(opts);
+      else if (kind === "rois") await exportStackRois(opts);
       else await exportStackReport(opts);
     } catch (err) {
       notifications.show({ color: "red", title: "Export failed", message: err.message || String(err) });
@@ -745,6 +748,12 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
               </Menu.Item>
               <Menu.Item icon={<IconShape size={14} />} onClick={() => runExport("outlines")}>
                 Flake outlines (transparent PNG)
+              </Menu.Item>
+              <Menu.Item icon={<IconFiles size={14} />} onClick={() => runExport("flakes")}>
+                Per-flake PNGs (ZIP)
+              </Menu.Item>
+              <Menu.Item icon={<IconPolygon size={14} />} onClick={() => runExport("rois")}>
+                Editable ROIs (imaging JSON)
               </Menu.Item>
               <Menu.Item icon={<IconFileText size={14} />} onClick={() => runExport("report")}>
                 Stack report (PDF)
