@@ -15,6 +15,7 @@ import {
 import { exportStackPng, exportStackReport, exportStackOutlines, exportStackFlakes } from "../../utils/stackExport";
 import { exportStackRois } from "../../utils/roiExport";
 import { warmFlakePicker, pickFlakeAt } from "../../utils/flakePick";
+import { pickShapeAt } from "../../utils/shapePick";
 
 const CANVAS_SIZE = 700;
 const ROTATION_STEP = 3;
@@ -234,14 +235,25 @@ function StackCanvas({ layers, activeLayerIndex, selectedLayerIds, onSelectLayer
     document.addEventListener("pointerup", onUp);
   }, [onUpdateLayer]);
 
-  // Resolve which flake a click meant (smallest covering silhouette) and act on
-  // it. Returns true if a flake was selected, false if the click hit no flake or
-  // should fall through to the caller's default (native layer drag / pan).
+  // Resolve which object (shape or flake) a click meant and act on it. Shapes
+  // are tested first by geometry; among a shape and a flake both covering the
+  // point, the one rendered on top (higher layer_index) wins. Among multiple
+  // covering flakes, the smallest silhouette wins (see pickFlakeAt). Returns
+  // true if something was selected, false if the click hit nothing or should
+  // fall through to the caller's default (native layer drag / pan).
   //   opts.fromLayer — call originates from a layer's own pointer handler, whose
   //   native drag should win when the pick resolves to that same active layer or
   //   to a member of the current multi-selection.
   const pickAndSelect = useCallback((point, e, opts = {}) => {
-    const pickedId = pickFlakeAt(sortedRef.current, point);
+    const layers = sortedRef.current;
+    const shapeId = pickShapeAt(layers, point, zoomRef.current);
+    const flakeId = pickFlakeAt(layers, point);
+    let pickedId = flakeId;
+    if (shapeId != null) {
+      const flakeLayer = flakeId != null ? layers.find((l) => l.id === flakeId) : null;
+      const shapeLayer = layers.find((l) => l.id === shapeId);
+      pickedId = flakeLayer && flakeLayer.layer_index > shapeLayer.layer_index ? flakeId : shapeId;
+    }
     if (pickedId == null) return false;
     const gIds = groupIdsRef.current;
     // Keep a multi-selection intact: let the native group-drag handler take it.
