@@ -1,6 +1,9 @@
 services:
   backend:
     restart: unless-stopped
+    mem_limit: 8g
+    memswap_limit: 8g
+    cpus: 4.0
     build:
       context: ./Backend
       dockerfile: Dockerfile
@@ -22,7 +25,10 @@ services:
       context: ./Frontend
       dockerfile: Dockerfile
     restart: "no"
+    mem_limit: 4g
+    memswap_limit: 4g
     environment:
+      - NODE_OPTIONS=--max-old-space-size=3072
       - REACT_APP_STACK_BACKEND_URL=/api/
       - REACT_APP_GMM_IMAGE_URL=http://134.61.8.242/images/
     volumes:
@@ -32,6 +38,8 @@ services:
   nginx:
     image: nginx:1.27.2-alpine
     restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
     ports:
       - "8080:80"
     volumes:
